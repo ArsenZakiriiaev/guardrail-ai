@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -88,7 +89,11 @@ def _resolve_semgrep_binary() -> str:
 
 def _build_semgrep_env() -> dict[str, str]:
     env = os.environ.copy()
-    tmp_home = "/tmp/guardrail-semgrep-home"
+    uid = getattr(os, "getuid", lambda: "unknown")()
+    tmp_home = f"{tempfile.gettempdir()}/guardrail-semgrep-home-{uid}"
+    Path(tmp_home).mkdir(parents=True, exist_ok=True)
+    Path(f"{tmp_home}/config").mkdir(parents=True, exist_ok=True)
+    Path(f"{tmp_home}/cache").mkdir(parents=True, exist_ok=True)
     env.setdefault("HOME", tmp_home)
     env.setdefault("XDG_CONFIG_HOME", f"{tmp_home}/config")
     env.setdefault("XDG_CACHE_HOME", f"{tmp_home}/cache")
