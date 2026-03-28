@@ -233,8 +233,8 @@
     </div>
 
     <div class="ai-controls">
-      <input class="ctrl-input" id="claude-api-key" type="password" placeholder="Optional Claude API key for Claude-assisted review / pentest">
-      <div class="ctrl-note">Guardrail always runs the built-in scanner or pentest first. In scan mode Claude adds a second review. In pentest mode Claude proposes extra HTTP probes against the discovered endpoints and Guardrail executes them. The key is only sent with the request you run.</div>
+      <input class="ctrl-input" id="claude-api-key" type="password" placeholder="Optional AI API key">
+      <div class="ctrl-note">Guardrail always runs the built-in scanner or pentest first. In scan mode the AI adds a second review. In pentest mode the AI proposes extra HTTP probes against the discovered endpoints and Guardrail executes them. The key is only sent with the request you run.</div>
     </div>
 
     <div class="mode-tabs">
@@ -325,7 +325,7 @@ os.system(user_input)"></textarea>
         </div>
         <div class="ft-row">
           <div class="ft-field">
-            <label class="ft-label">Anthropic API Key (optional — uses ANTHROPIC_API_KEY env var if blank)</label>
+            <label class="ft-label">AI API Key (optional — uses ANTHROPIC_API_KEY env var if blank)</label>
             <input class="ft-input" id="ft-api-key" type="password" placeholder="sk-ant-...">
           </div>
         </div>
@@ -636,7 +636,7 @@ os.system(user_input)"></textarea>
         ${s.blocked ? `<span class="stat"><span class="dot r"></span>${s.blocked} blocked</span>` : ""}
         ${s.warned ? `<span class="stat"><span class="dot y"></span>${s.warned} warnings</span>` : ""}
         ${s.files_scanned ? `<span class="stat"><span class="dot c"></span>${s.files_scanned} files</span>` : ""}
-        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>Claude ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
+        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>AI ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
       `;
 
       document.getElementById("rp-body").innerHTML = findings.map((f, i) => `
@@ -659,9 +659,9 @@ os.system(user_input)"></textarea>
               <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
             </div></div>` : ""}
             ${f.claude_explanation ? `<div class="ds"><div class="ai-card claude">
-              <div class="al summary">Claude second pass</div><p>${esc(f.claude_explanation.summary)}</p>
-              <div class="al risk">Claude risk</div><p>${esc(f.claude_explanation.risk)}</p>
-              <div class="al fix-l">Claude fix</div><p>${esc(f.claude_explanation.fix)}</p>
+              <div class="al summary">AI review</div><p>${esc(f.claude_explanation.summary)}</p>
+              <div class="al risk">AI risk</div><p>${esc(f.claude_explanation.risk)}</p>
+              <div class="al fix-l">AI fix</div><p>${esc(f.claude_explanation.fix)}</p>
             </div></div>` : ""}
             ${f.fix ? `<div class="ds"><div class="dl">Suggested Fix</div><div class="cb fix">${esc(f.fix.fixed_code)}</div>
               ${f.fix.explanation ? `<div class="fix-expl">↳ ${esc(f.fix.explanation)}</div>` : ""}</div>` : ""}
@@ -684,7 +684,7 @@ os.system(user_input)"></textarea>
         <span class="stat"><span class="dot c"></span>${summary.requests_sent} requests</span>
         <span class="stat"><span class="dot c"></span>${summary.endpoints} endpoints</span>
         ${metadata.active_checks_requested ? `<span class="stat"><span class="dot ${metadata.active_checks_ran ? "g" : "y"}"></span>${metadata.active_checks_ran ? "active checks ran" : "passive only"}</span>` : ""}
-        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>Claude ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
+        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>AI ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
       `;
 
       if (!findings || !findings.length) {
@@ -715,9 +715,9 @@ os.system(user_input)"></textarea>
               <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
             </div></div>` : ""}
             ${f.claude_explanation ? `<div class="ds"><div class="ai-card claude">
-              <div class="al summary">Claude second pass</div><p>${esc(f.claude_explanation.summary)}</p>
-              <div class="al risk">Claude risk</div><p>${esc(f.claude_explanation.risk)}</p>
-              <div class="al fix-l">Claude fix</div><p>${esc(f.claude_explanation.fix)}</p>
+              <div class="al summary">AI review</div><p>${esc(f.claude_explanation.summary)}</p>
+              <div class="al risk">AI risk</div><p>${esc(f.claude_explanation.risk)}</p>
+              <div class="al fix-l">AI fix</div><p>${esc(f.claude_explanation.fix)}</p>
             </div></div>` : ""}
           </div>
         </div>`).join("") + (metadata.active_skip_reason ? `<div class="clean"><div class="clean-s">${esc(metadata.active_skip_reason)}</div></div>` : "");
