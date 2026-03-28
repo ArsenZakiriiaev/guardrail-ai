@@ -20,11 +20,11 @@ import requests
 
 from pentest.api import (
     MAX_TOTAL_SIZE,
-    build_pentest_payload,
     extract_safe_zip,
     materialize_files,
     normalize_code_payload,
     run_pentest_from_files,
+    run_pentest_from_url,
     run_pentest_from_zip,
     validate_total_size,
 )
@@ -203,6 +203,26 @@ async def pentest_zip(file: UploadFile = File(...), auth_header: str | None = No
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
+@app.post("/api/pentest-url")
+async def pentest_url(request: Request):
+    body = await request.json()
+    try:
+        if _runner_url():
+            payload = _proxy_pentest_url(body)
+        else:
+            payload = run_pentest_from_url(
+                body.get("url", ""),
+                auth_header=body.get("auth_header"),
+                ai=bool(body.get("ai", False)),
+                active=bool(body.get("active", False)),
+            )
+        return JSONResponse(payload)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "0.3.0"}
@@ -241,6 +261,16 @@ def _proxy_pentest_zip(
         f"{_runner_url()}/api/pentest-zip",
         params={"auth_header": auth_header or "", "ai": str(ai).lower()},
         files={"file": (filename, data, "application/zip")},
+        headers=_runner_headers(),
+        timeout=float(os.getenv("GUARDRAIL_PENTEST_RUNNER_TIMEOUT", "180")),
+    )
+    return _parse_runner_response(response)
+
+
+def _proxy_pentest_url(body: dict) -> dict:
+    response = requests.post(
+        f"{_runner_url()}/api/pentest-url",
+        json=body,
         headers=_runner_headers(),
         timeout=float(os.getenv("GUARDRAIL_PENTEST_RUNNER_TIMEOUT", "180")),
     )

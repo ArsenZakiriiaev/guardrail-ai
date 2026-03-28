@@ -3,6 +3,7 @@ cli/main.py — CLI на Typer.
 Команды:
   guardrail scan <path>       — полное сканирование
   guardrail pentest <path>    — контейнеризированный HTTP pentest
+  guardrail pentest-url <url> — URL pentest (passive + constrained active checks)
   guardrail pentest-runner    — локальный runner для web UI
   guardrail check <path>      — быстрая проверка (exit code)
   guardrail watch [path]      — real-time мониторинг
@@ -45,6 +46,7 @@ from hooks.manager import (
 from pentest.engine import run_pentest
 from pentest.models import PentestReport
 from pentest.runner_app import create_app as create_pentest_runner_app
+from pentest.url_engine import run_url_pentest
 
 # Попытка импорта AI-слоя Dev 1 (может не быть на момент разработки)
 try:
@@ -276,6 +278,75 @@ def pentest(
     raise typer.Exit(0)
 
 
+@app.command("pentest-url")
+def pentest_url(
+    url: str = typer.Argument(..., help="HTTP(S) URL to audit"),
+    auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
+    output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
+    active: bool = typer.Option(False, "--active", help="Run constrained live active checks in addition to passive checks"),
+    allow_host: list[str] = typer.Option(
+        None,
+        "--allow-host",
+        help="Allow active URL checks for this exact host or wildcard suffix like *.example.com",
+    ),
+    html_report: str = typer.Option(None, "--html-report", help="Write a standalone HTML report to this path"),
+    timeout: int = typer.Option(60, "--timeout", help="Global pentest timeout in seconds"),
+    rate_limit: float = typer.Option(2.0, "--rate-limit", help="Maximum requests per second"),
+):
+    """
+    Run a URL-based pentest. Passive checks work for any HTTP(S) URL.
+    Active live checks are limited to explicitly allowlisted hosts.
+    """
+    if not output_json:
+        console.print(f"[dim]🌐 URL pentest:[/dim] {url}")
+
+    project_root = Path.cwd()
+
+    try:
+        report = run_url_pentest(
+            url,
+            auth_header=auth_header,
+            enable_ai=ai,
+            active=active,
+            allowed_hosts=allow_host or None,
+            timeout_seconds=timeout,
+            rate_limit_per_second=rate_limit,
+            html_report_path=html_report,
+            project_root=project_root,
+        )
+    except Exception as e:
+        error_console.print(f"[red]Pentest error:[/red] {e}")
+        raise typer.Exit(2)
+
+    if output_json:
+        print(report.model_dump_json(indent=2))
+    else:
+        _print_pentest_report(report)
+        if report.metadata.get("active_checks_requested") and not report.metadata.get("active_checks_ran"):
+            console.print(f"[yellow]Note:[/yellow] {report.metadata.get('active_skip_reason', 'Active checks were skipped.')}")
+        if report.html_report_path:
+            console.print(f"[green]✓[/green] HTML report: {report.html_report_path}")
+        if report.request_log_path:
+            console.print(f"[dim]HTTP audit log:[/dim] {report.request_log_path}")
+
+    log_event(
+        project_root,
+        "pentest_url_cli",
+        findings=[finding.to_finding() for finding in report.findings],
+        blocked=report.summary.blocked,
+        warned=report.summary.warned,
+        ignored=report.summary.ignored,
+        trigger="manual",
+        target=url,
+        details=f"score={report.summary.score}; verdict={report.summary.verdict}; active={active}",
+    )
+
+    if report.summary.verdict == "block":
+        raise typer.Exit(1)
+    raise typer.Exit(0)
+
+
 @app.command("pentest-runner")
 def pentest_runner(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the local pentest runner"),
@@ -290,6 +361,11 @@ def pentest_runner(
         "--runner-token",
         help="Optional token required in X-Guardrail-Runner-Token header.",
     ),
+    allow_active_host: list[str] = typer.Option(
+        None,
+        "--allow-active-host",
+        help="Allow active URL checks for this host. Repeat for multiple hosts.",
+    ),
 ):
     """
     Start a local pentest runner that the web UI can call directly from the browser.
@@ -302,7 +378,11 @@ def pentest_runner(
         raise typer.Exit(2) from exc
 
     origins = allow_origin or ["*"]
-    runner_app = create_pentest_runner_app(allowed_origins=origins, runner_token=runner_token)
+    runner_app = create_pentest_runner_app(
+        allowed_origins=origins,
+        runner_token=runner_token,
+        allowed_active_hosts=allow_active_host or None,
+    )
     console.print(
         f"[green]✓[/green] Starting pentest runner on http://{host}:{port} "
         f"(origins: {', '.join(origins)})"

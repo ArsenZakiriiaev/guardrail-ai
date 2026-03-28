@@ -196,11 +196,13 @@
     </div>
 
     <div class="op-controls" id="op-controls">
+      <input class="ctrl-input" id="target-url" placeholder="Optional target URL for pentest, e.g. https://demo.example.com/login">
       <input class="ctrl-input compact" id="runner-url" placeholder="Runner URL, e.g. http://127.0.0.1:8001">
       <input class="ctrl-input compact" id="runner-token" placeholder="Optional runner token">
       <input class="ctrl-input" id="auth-header" placeholder='Optional auth header for pentest, e.g. Authorization: Bearer token'>
+      <label class="ctrl-check"><input type="checkbox" id="pentest-url-active"> Active URL checks</label>
       <label class="ctrl-check"><input type="checkbox" id="pentest-ai"> AI explanations</label>
-      <div class="ctrl-note">For a remote website, run <code>guardrail pentest-runner</code> on this computer and keep the runner URL set to your local endpoint.</div>
+      <div class="ctrl-note">URL mode runs passive checks for any HTTP(S) URL. Active live checks only run for allowlisted hosts on the runner. For a remote website, run <code>guardrail pentest-runner</code> on this computer and keep the runner URL set to your local endpoint.</div>
     </div>
 
     <div class="mode-tabs">
@@ -298,10 +300,12 @@ os.system(user_input)"></textarea>
     let operation = "scan";
     const runnerUrlInput = document.getElementById("runner-url");
     const runnerTokenInput = document.getElementById("runner-token");
+    const targetUrlInput = document.getElementById("target-url");
     const codeInput = document.getElementById("code-input");
     const fileList = document.getElementById("file-list");
     const RUNNER_URL_KEY = "guardrail.runnerUrl";
     const RUNNER_TOKEN_KEY = "guardrail.runnerToken";
+    const TARGET_URL_KEY = "guardrail.targetUrl";
 
     // ── Mode switching ─────────────────────────
     function setMode(mode) {
@@ -320,8 +324,9 @@ os.system(user_input)"></textarea>
 
     function updateOperationUi() {
       document.getElementById("op-controls").classList.toggle("show", operation === "pentest");
+      const urlMode = operation === "pentest" && !!(targetUrlInput.value || "").trim();
       document.getElementById("code-btn-label").innerHTML = operation === "pentest"
-        ? "Run Pentest  <kbd>⌘↵</kbd>"
+        ? `${urlMode ? "Run URL Pentest" : "Run Pentest"}  <kbd>⌘↵</kbd>`
         : "Scan All Files  <kbd>⌘↵</kbd>";
       document.getElementById("zip-btn-label").textContent = operation === "pentest" ? "Pentest ZIP" : "Scan ZIP";
     }
@@ -392,6 +397,10 @@ os.system(user_input)"></textarea>
     codeInput.addEventListener("input", () => { files[activeFile] = codeInput.value; });
     runnerUrlInput.addEventListener("input", () => localStorage.setItem(RUNNER_URL_KEY, runnerUrlInput.value));
     runnerTokenInput.addEventListener("input", () => localStorage.setItem(RUNNER_TOKEN_KEY, runnerTokenInput.value));
+    targetUrlInput.addEventListener("input", () => {
+      localStorage.setItem(TARGET_URL_KEY, targetUrlInput.value);
+      updateOperationUi();
+    });
 
     // Cmd+Enter
     codeInput.addEventListener("keydown", (e) => {
@@ -401,8 +410,34 @@ os.system(user_input)"></textarea>
 
     // ── Scan files ─────────────────────────────
     function runCodeAction() {
+      if (operation === "pentest" && (targetUrlInput.value || "").trim()) return pentestUrl();
       if (operation === "pentest") return pentestFiles();
       return scanFiles();
+    }
+
+    async function pentestUrl() {
+      const targetUrl = (targetUrlInput.value || "").trim();
+      if (!targetUrl) return;
+
+      const btn = document.getElementById("scan-btn-code");
+      btn.classList.add("loading"); btn.disabled = true;
+      try {
+        const res = await fetch(pentestEndpoint("/api/pentest-url"), {
+          method: "POST",
+          headers: runnerHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            url: targetUrl,
+            auth_header: document.getElementById("auth-header").value.trim() || null,
+            ai: document.getElementById("pentest-ai").checked,
+            active: document.getElementById("pentest-url-active").checked,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showError(data.detail || data.error || "URL pentest failed."); return; }
+        if (data.error) { showError(data.error); return; }
+        showResults(data);
+      } catch(e) { showError(`URL pentest failed. Start a local runner with 'guardrail pentest-runner' or clear Runner URL. (${e.message || "connection error"})`); }
+      finally { btn.classList.remove("loading"); btn.disabled = false; }
     }
 
     async function scanFiles() {
@@ -546,6 +581,7 @@ os.system(user_input)"></textarea>
     function showPentestResults(data) {
       const panel = document.getElementById("results-panel");
       const { findings, summary } = data;
+      const metadata = data.metadata || {};
 
       document.getElementById("rp-title").textContent = `${summary.total} pentest issue${summary.total !== 1 ? "s" : ""}`;
       document.getElementById("rp-summary").innerHTML = `
@@ -553,11 +589,12 @@ os.system(user_input)"></textarea>
         <span class="stat"><span class="dot c"></span>score ${summary.score}</span>
         <span class="stat"><span class="dot c"></span>${summary.requests_sent} requests</span>
         <span class="stat"><span class="dot c"></span>${summary.endpoints} endpoints</span>
+        ${metadata.active_checks_requested ? `<span class="stat"><span class="dot ${metadata.active_checks_ran ? "g" : "y"}"></span>${metadata.active_checks_ran ? "active checks ran" : "passive only"}</span>` : ""}
       `;
 
       if (!findings || !findings.length) {
         document.getElementById("rp-body").innerHTML = `
-          <div class="clean"><div class="clean-ic">✓</div><div class="clean-t">No pentest issues found</div><div class="clean-s">${esc(data.framework || "app")} · score ${summary.score}</div></div>`;
+          <div class="clean"><div class="clean-ic">✓</div><div class="clean-t">No pentest issues found</div><div class="clean-s">${esc(data.target || data.framework || "app")} · score ${summary.score}</div>${metadata.active_skip_reason ? `<div class="clean-s">${esc(metadata.active_skip_reason)}</div>` : ""}</div>`;
         panel.classList.add("show");
         return;
       }
@@ -583,7 +620,7 @@ os.system(user_input)"></textarea>
               <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
             </div></div>` : ""}
           </div>
-        </div>`).join("");
+        </div>`).join("") + (metadata.active_skip_reason ? `<div class="clean"><div class="clean-s">${esc(metadata.active_skip_reason)}</div></div>` : "");
 
       panel.classList.add("show");
     }
@@ -601,6 +638,7 @@ os.system(user_input)"></textarea>
     // Init
     runnerUrlInput.value = localStorage.getItem(RUNNER_URL_KEY) || "http://127.0.0.1:8001";
     runnerTokenInput.value = localStorage.getItem(RUNNER_TOKEN_KEY) || "";
+    targetUrlInput.value = localStorage.getItem(TARGET_URL_KEY) || "";
     renderFileList();
     updateOperationUi();
   </script>
