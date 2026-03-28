@@ -48,8 +48,10 @@
     .op-controls{max-width:1080px;margin:0 auto 14px;padding:0 20px;display:none;gap:12px;align-items:center;flex-wrap:wrap}
     .op-controls.show{display:flex}
     .ctrl-input{flex:1;min-width:260px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;color:var(--t);font-size:12px;font-family:var(--mono)}
+    .ctrl-input.compact{min-width:180px;flex:0 1 240px}
     .ctrl-check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--td)}
     .ctrl-check input{accent-color:var(--accent)}
+    .ctrl-note{width:100%;font-size:11px;color:var(--tm);line-height:1.5}
 
     /* ── Main layout ─────────────── */
     main{max-width:1080px;margin:0 auto;padding:0 20px 60px}
@@ -194,8 +196,11 @@
     </div>
 
     <div class="op-controls" id="op-controls">
+      <input class="ctrl-input compact" id="runner-url" placeholder="Runner URL, e.g. http://127.0.0.1:8001">
+      <input class="ctrl-input compact" id="runner-token" placeholder="Optional runner token">
       <input class="ctrl-input" id="auth-header" placeholder='Optional auth header for pentest, e.g. Authorization: Bearer token'>
       <label class="ctrl-check"><input type="checkbox" id="pentest-ai"> AI explanations</label>
+      <div class="ctrl-note">For a remote website, run <code>guardrail pentest-runner</code> on this computer and keep the runner URL set to your local endpoint.</div>
     </div>
 
     <div class="mode-tabs">
@@ -291,8 +296,12 @@ os.system(user_input)"></textarea>
     let files = { "main.py": "" };
     let activeFile = "main.py";
     let operation = "scan";
+    const runnerUrlInput = document.getElementById("runner-url");
+    const runnerTokenInput = document.getElementById("runner-token");
     const codeInput = document.getElementById("code-input");
     const fileList = document.getElementById("file-list");
+    const RUNNER_URL_KEY = "guardrail.runnerUrl";
+    const RUNNER_TOKEN_KEY = "guardrail.runnerToken";
 
     // ── Mode switching ─────────────────────────
     function setMode(mode) {
@@ -315,6 +324,22 @@ os.system(user_input)"></textarea>
         ? "Run Pentest  <kbd>⌘↵</kbd>"
         : "Scan All Files  <kbd>⌘↵</kbd>";
       document.getElementById("zip-btn-label").textContent = operation === "pentest" ? "Pentest ZIP" : "Scan ZIP";
+    }
+
+    function getRunnerBaseUrl() {
+      return (runnerUrlInput.value || "").trim().replace(/\/+$/, "");
+    }
+
+    function runnerHeaders(extra = {}) {
+      const headers = { ...extra };
+      const token = (runnerTokenInput.value || "").trim();
+      if (token) headers["X-Guardrail-Runner-Token"] = token;
+      return headers;
+    }
+
+    function pentestEndpoint(path) {
+      const base = getRunnerBaseUrl();
+      return base ? `${base}${path}` : path;
     }
 
     // ── File management ────────────────────────
@@ -365,6 +390,8 @@ os.system(user_input)"></textarea>
 
     // Save on keystroke
     codeInput.addEventListener("input", () => { files[activeFile] = codeInput.value; });
+    runnerUrlInput.addEventListener("input", () => localStorage.setItem(RUNNER_URL_KEY, runnerUrlInput.value));
+    runnerTokenInput.addEventListener("input", () => localStorage.setItem(RUNNER_TOKEN_KEY, runnerTokenInput.value));
 
     // Cmd+Enter
     codeInput.addEventListener("keydown", (e) => {
@@ -408,9 +435,9 @@ os.system(user_input)"></textarea>
       const btn = document.getElementById("scan-btn-code");
       btn.classList.add("loading"); btn.disabled = true;
       try {
-        const res = await fetch("/api/pentest", {
+        const res = await fetch(pentestEndpoint("/api/pentest"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: runnerHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             files: nonEmpty,
             auth_header: document.getElementById("auth-header").value.trim() || null,
@@ -418,9 +445,10 @@ os.system(user_input)"></textarea>
           }),
         });
         const data = await res.json();
+        if (!res.ok) { showError(data.detail || data.error || "Pentest failed."); return; }
         if (data.error) { showError(data.error); return; }
         showResults(data);
-      } catch(e) { showError("Pentest failed."); }
+      } catch(e) { showError(`Pentest failed. Start a local runner with 'guardrail pentest-runner' or clear Runner URL. (${e.message || "connection error"})`); }
       finally { btn.classList.remove("loading"); btn.disabled = false; }
     }
 
@@ -446,14 +474,20 @@ os.system(user_input)"></textarea>
 
       try {
         const endpoint = operation === "pentest" ? "/api/pentest-zip" : "/api/scan-zip";
+        const resolvedEndpoint = operation === "pentest" ? pentestEndpoint("/api/pentest-zip") : endpoint;
         const query = operation === "pentest"
           ? `?auth_header=${encodeURIComponent(document.getElementById("auth-header").value.trim() || "")}&ai=${document.getElementById("pentest-ai").checked ? "true" : "false"}`
           : "";
-        const res = await fetch(endpoint + query, { method: "POST", body: form });
+        const res = await fetch(resolvedEndpoint + query, {
+          method: "POST",
+          body: form,
+          headers: operation === "pentest" ? runnerHeaders() : {},
+        });
         const data = await res.json();
+        if (!res.ok) { showError(data.detail || data.error || "Upload failed."); return; }
         if (data.error) { showError(data.error); return; }
         showResults(data);
-      } catch(e) { showError("Upload failed."); }
+      } catch(e) { showError(`${operation === "pentest" ? "Pentest" : "Upload"} failed. ${e.message || ""}`); }
       finally {
         btn.classList.remove("loading"); btn.disabled = false;
         uploadZone.querySelector(".uz-text").textContent = "Drop a .zip here or click to upload";
@@ -565,6 +599,8 @@ os.system(user_input)"></textarea>
     function esc(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
     // Init
+    runnerUrlInput.value = localStorage.getItem(RUNNER_URL_KEY) || "http://127.0.0.1:8001";
+    runnerTokenInput.value = localStorage.getItem(RUNNER_TOKEN_KEY) || "";
     renderFileList();
     updateOperationUi();
   </script>

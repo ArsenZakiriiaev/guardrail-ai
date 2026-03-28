@@ -3,6 +3,7 @@ cli/main.py — CLI на Typer.
 Команды:
   guardrail scan <path>       — полное сканирование
   guardrail pentest <path>    — контейнеризированный HTTP pentest
+  guardrail pentest-runner    — локальный runner для web UI
   guardrail check <path>      — быстрая проверка (exit code)
   guardrail watch [path]      — real-time мониторинг
   guardrail hooks install     — установить git-хуки
@@ -43,6 +44,7 @@ from hooks.manager import (
 )
 from pentest.engine import run_pentest
 from pentest.models import PentestReport
+from pentest.runner_app import create_app as create_pentest_runner_app
 
 # Попытка импорта AI-слоя Dev 1 (может не быть на момент разработки)
 try:
@@ -272,6 +274,40 @@ def pentest(
     if report.summary.verdict == "block":
         raise typer.Exit(1)
     raise typer.Exit(0)
+
+
+@app.command("pentest-runner")
+def pentest_runner(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the local pentest runner"),
+    port: int = typer.Option(8001, "--port", help="Port to bind the local pentest runner"),
+    allow_origin: list[str] = typer.Option(
+        None,
+        "--allow-origin",
+        help="Allowed browser origin for CORS. Repeat the flag to allow multiple origins.",
+    ),
+    runner_token: str = typer.Option(
+        None,
+        "--runner-token",
+        help="Optional token required in X-Guardrail-Runner-Token header.",
+    ),
+):
+    """
+    Start a local pentest runner that the web UI can call directly from the browser.
+    Useful when the main site is hosted remotely but Docker is available on this machine.
+    """
+    try:
+        import uvicorn
+    except ImportError as exc:
+        error_console.print("[red]Error:[/red] uvicorn is required to run the pentest runner.")
+        raise typer.Exit(2) from exc
+
+    origins = allow_origin or ["*"]
+    runner_app = create_pentest_runner_app(allowed_origins=origins, runner_token=runner_token)
+    console.print(
+        f"[green]✓[/green] Starting pentest runner on http://{host}:{port} "
+        f"(origins: {', '.join(origins)})"
+    )
+    uvicorn.run(runner_app, host=host, port=port, log_level="info")
 
 
 @app.command()
@@ -522,6 +558,7 @@ def show_help(
         "  guardrail scan . --json        Output as JSON (for CI)\n"
         "  guardrail pentest src/         Run isolated HTTP pentest in Docker\n"
         "  guardrail pentest app.py --ai  Pentest with AI explanations\n"
+        "  guardrail pentest-runner       Start local runner for the web UI\n"
         "  guardrail check app.py         Quick pass/fail (exit code)\n\n"
         "[bold cyan]REAL-TIME PROTECTION[/bold cyan]\n"
         "  guardrail watch                Watch current dir for changes\n"

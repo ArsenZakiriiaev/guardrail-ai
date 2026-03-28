@@ -78,6 +78,18 @@ Run isolated pentest against the demo web app:
 .venv/bin/guardrail pentest examples/vulnerable_demo.py --html-report .guardrail/pentest-report.html
 ```
 
+Run a local pentest runner for the web UI:
+
+```bash
+.venv/bin/guardrail pentest-runner --host 127.0.0.1 --port 8001
+```
+
+If your Docker daemon requires elevated privileges:
+
+```bash
+sudo env GUARDRAIL_DOCKER_BIN=/usr/bin/docker .venv/bin/guardrail pentest-runner --host 127.0.0.1 --port 8001
+```
+
 Pentest with AI explanations:
 
 ```bash
@@ -102,6 +114,7 @@ Notes for pentest v1:
 - Runs attacks only against the container it builds from your source code.
 - Requires Docker on the local machine.
 - Uses `--network none`, rate limiting, and a hard timeout for containment.
+- The web UI can call a local `pentest-runner` directly from the browser. This is the recommended way to use pentest mode when the main site is hosted remotely (for example on Railway).
 
 ## Use Ollama
 
