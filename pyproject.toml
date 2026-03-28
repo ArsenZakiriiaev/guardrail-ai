@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guardrail-ai"
+version = "0.1.0"
+description = "Pull-request security remediation CLI for Python code."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3.0",
+  "requests>=2.31,<3.0",
+  "rich>=13.7,<14.0",
+  "typer>=0.12,<1.0",
+  "semgrep==1.156.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2,<9.0",
+]
+
+[project.scripts]
+guardrail = "cli.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ai", "cli", "rules", "scanner", "shared"]
+
+[tool.setuptools.package-data]
+rules = ["*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
