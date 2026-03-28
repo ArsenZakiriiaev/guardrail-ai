@@ -56,7 +56,27 @@ def parse_findings(semgrep_output: dict) -> List[Finding]:
             )
         )
 
-    return findings
+    return _dedupe_findings(findings)
+
+
+def _dedupe_findings(findings: List[Finding]) -> List[Finding]:
+    deduped: List[Finding] = []
+    seen: set[tuple[str, int, str, str, str]] = set()
+
+    for finding in findings:
+        key = (
+            str(finding.file).strip(),
+            int(finding.line),
+            str(finding.rule_id).strip(),
+            str(finding.message).strip(),
+            str(finding.snippet).strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(finding)
+
+    return deduped
 
 
 def _extract_snippet(item: dict, finding_type: str, rule_id: str) -> str:

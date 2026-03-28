@@ -4,19 +4,33 @@ import json
 import os
 from typing import Any
 
+from ai.claude import ask_claude
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_OLLAMA_MODEL = "llama3:8b"
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
-def ask_llm(prompt: str) -> str:
-    mode = os.getenv("GUARDRAIL_LLM_MODE", "mock").strip().lower()
+def ask_llm(prompt: str, *, api_key: str | None = None) -> str:
+    mode = os.getenv("GUARDRAIL_LLM_MODE", "").strip().lower()
+
+    if (api_key or "").strip():
+        return _ask_anthropic(prompt, api_key=api_key)
+
+    if mode in {"anthropic", "claude"}:
+        return _ask_anthropic(prompt)
 
     if mode == "ollama":
         return _ask_ollama(prompt)
 
+    if mode in {"", "auto"} and os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return _ask_anthropic(prompt)
+
     return _build_mock_response(prompt)
+
+
+def _ask_anthropic(prompt: str, *, api_key: str | None = None) -> str:
+    return ask_claude(prompt, api_key=api_key)
 
 
 def _ask_ollama(prompt: str) -> str:

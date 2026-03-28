@@ -88,3 +88,36 @@ def test_parse_findings_reads_source_line_for_non_sensitive_findings(tmp_path) -
 
     assert len(findings) == 1
     assert findings[0].snippet == "result = eval(user_input)"
+
+
+def test_parse_findings_dedupes_identical_findings() -> None:
+    semgrep_output = {
+        "results": [
+            {
+                "path": "app.py",
+                "start": {"line": 10},
+                "check_id": "eval-use",
+                "extra": {
+                    "message": "Use of eval() on potentially untrusted input",
+                    "severity": "ERROR",
+                    "lines": "result = eval(user_input)",
+                    "metadata": {"type": "code"},
+                },
+            },
+            {
+                "path": "app.py",
+                "start": {"line": 10},
+                "check_id": "eval-use",
+                "extra": {
+                    "message": "Use of eval() on potentially untrusted input",
+                    "severity": "ERROR",
+                    "lines": "result = eval(user_input)",
+                    "metadata": {"type": "code"},
+                },
+            },
+        ]
+    }
+
+    findings = parse_findings(semgrep_output)
+
+    assert len(findings) == 1

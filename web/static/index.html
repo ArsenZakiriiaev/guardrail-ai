@@ -47,6 +47,7 @@
     .op-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
     .op-controls{max-width:1080px;margin:0 auto 14px;padding:0 20px;display:none;gap:12px;align-items:center;flex-wrap:wrap}
     .op-controls.show{display:flex}
+    .ai-controls{max-width:1080px;margin:0 auto 14px;padding:0 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .ctrl-input{flex:1;min-width:260px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;color:var(--t);font-size:12px;font-family:var(--mono)}
     .ctrl-input.compact{min-width:180px;flex:0 1 240px}
     .ctrl-check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--td)}
@@ -138,6 +139,7 @@
     .cb.snip{background:var(--rbg);border-color:rgba(239,68,68,.12)}
     .cb.fix{background:var(--gbg);border-color:rgba(34,197,94,.12)}
     .ai-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--rs);padding:10px 12px}
+    .ai-card.claude{background:rgba(6,182,212,.08);border-color:rgba(6,182,212,.16)}
     .ai-card p{font-size:12px;color:var(--td);line-height:1.55;margin-top:3px}
     .ai-card p:first-child{margin-top:0}
     .al{font-size:10px;font-weight:600;margin-bottom:2px}
@@ -228,6 +230,11 @@
       <label class="ctrl-check"><input type="checkbox" id="pentest-url-active"> Active URL checks</label>
       <label class="ctrl-check"><input type="checkbox" id="pentest-ai"> AI explanations</label>
       <div class="ctrl-note">URL mode runs passive checks for any HTTP(S) URL. Active live checks only run for allowlisted hosts on the runner. For a remote website, run <code>guardrail pentest-runner</code> on this computer and keep the runner URL set to your local endpoint.</div>
+    </div>
+
+    <div class="ai-controls">
+      <input class="ctrl-input" id="claude-api-key" type="password" placeholder="Optional Claude API key for a second pass">
+      <div class="ctrl-note">Guardrail always runs the built-in scanner or pentest first. If you provide a Claude API key, it also runs a second review through Claude and shows that result next to the local analysis. The key is only sent with the request you run.</div>
     </div>
 
     <div class="mode-tabs">
@@ -361,6 +368,7 @@ os.system(user_input)"></textarea>
     const runnerUrlInput = document.getElementById("runner-url");
     const runnerTokenInput = document.getElementById("runner-token");
     const targetUrlInput = document.getElementById("target-url");
+    const claudeApiKeyInput = document.getElementById("claude-api-key");
     const codeInput = document.getElementById("code-input");
     const fileList = document.getElementById("file-list");
     const RUNNER_URL_KEY = "guardrail.runnerUrl";
@@ -412,6 +420,10 @@ os.system(user_input)"></textarea>
     function pentestEndpoint(path) {
       const base = getRunnerBaseUrl();
       return base ? `${base}${path}` : path;
+    }
+
+    function getClaudeApiKey() {
+      return (claudeApiKeyInput.value || "").trim();
     }
 
     // ── File management ────────────────────────
@@ -496,6 +508,7 @@ os.system(user_input)"></textarea>
             url: targetUrl,
             auth_header: document.getElementById("auth-header").value.trim() || null,
             ai: document.getElementById("pentest-ai").checked,
+            claude_api_key: getClaudeApiKey() || null,
             active: document.getElementById("pentest-url-active").checked,
           }),
         });
@@ -519,7 +532,10 @@ os.system(user_input)"></textarea>
         const res = await fetch("/api/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: nonEmpty }),
+          body: JSON.stringify({
+            files: nonEmpty,
+            claude_api_key: getClaudeApiKey() || null,
+          }),
         });
         const data = await res.json();
         if (data.error) { showError(data.error); return; }
@@ -544,6 +560,7 @@ os.system(user_input)"></textarea>
             files: nonEmpty,
             auth_header: document.getElementById("auth-header").value.trim() || null,
             ai: document.getElementById("pentest-ai").checked,
+            claude_api_key: getClaudeApiKey() || null,
           }),
         });
         const data = await res.json();
@@ -573,14 +590,16 @@ os.system(user_input)"></textarea>
 
       const form = new FormData();
       form.append("file", file);
+      form.append("claude_api_key", getClaudeApiKey() || "");
+      if (operation === "pentest") {
+        form.append("auth_header", document.getElementById("auth-header").value.trim() || "");
+        form.append("ai", document.getElementById("pentest-ai").checked ? "true" : "false");
+      }
 
       try {
         const endpoint = operation === "pentest" ? "/api/pentest-zip" : "/api/scan-zip";
         const resolvedEndpoint = operation === "pentest" ? pentestEndpoint("/api/pentest-zip") : endpoint;
-        const query = operation === "pentest"
-          ? `?auth_header=${encodeURIComponent(document.getElementById("auth-header").value.trim() || "")}&ai=${document.getElementById("pentest-ai").checked ? "true" : "false"}`
-          : "";
-        const res = await fetch(resolvedEndpoint + query, {
+        const res = await fetch(resolvedEndpoint, {
           method: "POST",
           body: form,
           headers: operation === "pentest" ? runnerHeaders() : {},
@@ -601,6 +620,7 @@ os.system(user_input)"></textarea>
       if (data.mode === "pentest") return showPentestResults(data);
       const panel = document.getElementById("results-panel");
       const { findings, summary } = data;
+      const claude = (data.metadata || {}).claude_second_pass;
 
       if (!findings || !findings.length) {
         document.getElementById("rp-summary").innerHTML = "";
@@ -616,6 +636,7 @@ os.system(user_input)"></textarea>
         ${s.blocked ? `<span class="stat"><span class="dot r"></span>${s.blocked} blocked</span>` : ""}
         ${s.warned ? `<span class="stat"><span class="dot y"></span>${s.warned} warnings</span>` : ""}
         ${s.files_scanned ? `<span class="stat"><span class="dot c"></span>${s.files_scanned} files</span>` : ""}
+        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>Claude ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
       `;
 
       document.getElementById("rp-body").innerHTML = findings.map((f, i) => `
@@ -637,6 +658,11 @@ os.system(user_input)"></textarea>
               <div class="al risk">⚡ Risk</div><p>${esc(f.explanation.risk)}</p>
               <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
             </div></div>` : ""}
+            ${f.claude_explanation ? `<div class="ds"><div class="ai-card claude">
+              <div class="al summary">Claude second pass</div><p>${esc(f.claude_explanation.summary)}</p>
+              <div class="al risk">Claude risk</div><p>${esc(f.claude_explanation.risk)}</p>
+              <div class="al fix-l">Claude fix</div><p>${esc(f.claude_explanation.fix)}</p>
+            </div></div>` : ""}
             ${f.fix ? `<div class="ds"><div class="dl">Suggested Fix</div><div class="cb fix">${esc(f.fix.fixed_code)}</div>
               ${f.fix.explanation ? `<div class="fix-expl">↳ ${esc(f.fix.explanation)}</div>` : ""}</div>` : ""}
           </div>
@@ -649,6 +675,7 @@ os.system(user_input)"></textarea>
       const panel = document.getElementById("results-panel");
       const { findings, summary } = data;
       const metadata = data.metadata || {};
+      const claude = metadata.claude_second_pass;
 
       document.getElementById("rp-title").textContent = `${summary.total} pentest issue${summary.total !== 1 ? "s" : ""}`;
       document.getElementById("rp-summary").innerHTML = `
@@ -657,6 +684,7 @@ os.system(user_input)"></textarea>
         <span class="stat"><span class="dot c"></span>${summary.requests_sent} requests</span>
         <span class="stat"><span class="dot c"></span>${summary.endpoints} endpoints</span>
         ${metadata.active_checks_requested ? `<span class="stat"><span class="dot ${metadata.active_checks_ran ? "g" : "y"}"></span>${metadata.active_checks_ran ? "active checks ran" : "passive only"}</span>` : ""}
+        ${claude && claude.requested ? `<span class="stat"><span class="dot ${claude.failed ? "y" : "c"}"></span>Claude ${claude.completed}${claude.failed ? ` ok / ${claude.failed} failed` : " ok"}</span>` : ""}
       `;
 
       if (!findings || !findings.length) {
@@ -685,6 +713,11 @@ os.system(user_input)"></textarea>
               <div class="al summary">💡 What happened</div><p>${esc(f.explanation.summary)}</p>
               <div class="al risk">⚡ Risk</div><p>${esc(f.explanation.risk)}</p>
               <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
+            </div></div>` : ""}
+            ${f.claude_explanation ? `<div class="ds"><div class="ai-card claude">
+              <div class="al summary">Claude second pass</div><p>${esc(f.claude_explanation.summary)}</p>
+              <div class="al risk">Claude risk</div><p>${esc(f.claude_explanation.risk)}</p>
+              <div class="al fix-l">Claude fix</div><p>${esc(f.claude_explanation.fix)}</p>
             </div></div>` : ""}
           </div>
         </div>`).join("") + (metadata.active_skip_reason ? `<div class="clean"><div class="clean-s">${esc(metadata.active_skip_reason)}</div></div>` : "");

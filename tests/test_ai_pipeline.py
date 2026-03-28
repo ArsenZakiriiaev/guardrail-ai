@@ -8,6 +8,7 @@ from ai.explain import explain_finding
 from ai.fix import fix_finding
 from ai.parser import parse_explain_response
 from ai.prompts import build_explain_prompt
+from ai.second_pass import run_claude_second_pass
 from shared.models import Finding, Severity
 
 
@@ -146,3 +147,40 @@ def test_ask_llm_ollama_raises_on_request_failure(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="Ollama request failed"):
         ask_llm("hello")
+
+
+def test_ask_llm_prefers_anthropic_when_api_key_is_provided(monkeypatch) -> None:
+    monkeypatch.delenv("GUARDRAIL_LLM_MODE", raising=False)
+    monkeypatch.setattr("ai.client._ask_anthropic", lambda prompt, api_key=None: '{"summary":"live"}')
+
+    result = ask_llm("hello", api_key="test-key")
+
+    assert result == '{"summary":"live"}'
+
+
+def test_run_claude_second_pass_collects_reviews(monkeypatch) -> None:
+    finding = Finding(
+        rule_id="eval-use",
+        type="code",
+        severity=Severity.HIGH,
+        message="Use of eval() on user-controlled input",
+        file="app.py",
+        line=8,
+        snippet="result = eval(user_input)",
+    )
+
+    def fake_explain(finding_arg, *, api_key=None, model=None, independent=False):
+        assert api_key == "test-key"
+        assert finding_arg.rule_id == "eval-use"
+        assert independent is True
+        return parse_explain_response('{"summary":"s","risk":"r","fix":"f","confidence":"high"}')
+
+    monkeypatch.setattr("ai.second_pass.explain_finding_with_claude", fake_explain)
+
+    reviews, metadata = run_claude_second_pass([finding], api_key="test-key")
+
+    assert metadata == {"requested": True, "completed": 1, "failed": 0}
+    review = reviews[(finding.file, finding.line, finding.rule_id)]
+    assert review.summary == "s"
+    assert review.risk == "r"
+    assert review.fix == "f"

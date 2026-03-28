@@ -47,6 +47,7 @@ from pentest.engine import run_pentest
 from pentest.models import PentestReport
 from pentest.runner_app import create_app as create_pentest_runner_app
 from pentest.url_engine import run_url_pentest
+from ai.second_pass import run_claude_second_pass
 
 # Попытка импорта AI-слоя Dev 1 (может не быть на момент разработки)
 try:
@@ -86,6 +87,7 @@ def scan(
     path: str = typer.Argument(..., help="File or directory to scan"),
     output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Skip AI explanations"),
+    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for a second AI pass"),
 ):
     """
     Scan a file or directory for security issues.
@@ -133,13 +135,21 @@ def scan(
 
     # 4. AI-обогащение (если Dev 1 уже сделал orchestrator)
     enriched = None
+    claude_reviews = {}
     active_findings = [f for f, _ in blocked] + [f for f, _ in warned]
     if AI_AVAILABLE and not no_ai and active_findings:
         try:
-            enriched = enrich_findings(active_findings)
+            enriched = enrich_findings(active_findings, api_key=claude_api_key)
         except Exception as e:
             error_console.print(f"[yellow]Warning:[/yellow] AI enrichment failed: {e}")
             enriched = None
+    if claude_api_key and active_findings:
+        claude_reviews, claude_metadata = run_claude_second_pass(active_findings, api_key=claude_api_key)
+        if claude_metadata.get("failed"):
+            error_console.print(
+                f"[yellow]Warning:[/yellow] Claude second pass completed with "
+                f"{claude_metadata['failed']} failure(s): {claude_metadata.get('error', 'unknown error')}"
+            )
 
     # 5. Audit log
     log_event(
@@ -155,9 +165,9 @@ def scan(
 
     # 6. Вывод
     if output_json:
-        _print_json(findings, enriched, evaluation)
+        _print_json(findings, enriched, evaluation, claude_reviews=claude_reviews)
     else:
-        _print_table_with_policy(findings, enriched, evaluation)
+        _print_table_with_policy(findings, enriched, evaluation, claude_reviews=claude_reviews)
 
     # Exit 1 если есть blocked findings
     if blocked:
@@ -221,6 +231,7 @@ def pentest(
     auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
     output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
+    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for a second AI pass"),
     html_report: str = typer.Option(None, "--html-report", help="Write a standalone HTML report to this path"),
     timeout: int = typer.Option(120, "--timeout", help="Global pentest timeout in seconds"),
     rate_limit: float = typer.Option(4.0, "--rate-limit", help="Maximum requests per second inside the container"),
@@ -244,6 +255,7 @@ def pentest(
             target=path,
             auth_header=auth_header,
             enable_ai=ai,
+            claude_api_key=claude_api_key,
             timeout_seconds=timeout,
             rate_limit_per_second=rate_limit,
             html_report_path=html_report,
@@ -284,6 +296,7 @@ def pentest_url(
     auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
     output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
+    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for a second AI pass"),
     active: bool = typer.Option(False, "--active", help="Run constrained live active checks in addition to passive checks"),
     allow_host: list[str] = typer.Option(
         None,
@@ -308,6 +321,7 @@ def pentest_url(
             url,
             auth_header=auth_header,
             enable_ai=ai,
+            claude_api_key=claude_api_key,
             active=active,
             allowed_hosts=allow_host or None,
             timeout_seconds=timeout,
@@ -867,6 +881,7 @@ def _print_table_with_policy(
     findings: list[Finding],
     enriched: list[EnrichedFinding] | None,
     evaluation: dict,
+    claude_reviews: dict | None = None,
 ):
     """Красивый вывод с учётом политик (blocked/warned/ignored)."""
     blocked = evaluation["blocked"]
@@ -875,11 +890,11 @@ def _print_table_with_policy(
 
     if blocked:
         console.print(f"\n[red]🚫 {len(blocked)} BLOCKED issue(s):[/red]\n")
-        _render_finding_panels(blocked, enriched, "red", "BLOCKED")
+        _render_finding_panels(blocked, enriched, "red", "BLOCKED", claude_reviews=claude_reviews)
 
     if warned:
         console.print(f"\n[yellow]⚠️  {len(warned)} warning(s):[/yellow]\n")
-        _render_finding_panels(warned, enriched, "yellow", "WARNING")
+        _render_finding_panels(warned, enriched, "yellow", "WARNING", claude_reviews=claude_reviews)
 
     if ignored:
         console.print(f"[dim]  ({len(ignored)} ignored by policy)[/dim]")
@@ -941,6 +956,7 @@ def _render_finding_panels(
     enriched: list[EnrichedFinding] | None,
     border_color: str,
     label: str,
+    claude_reviews: dict | None = None,
 ):
     """Рендерит панели для списка (finding, decision) с обогащением."""
     enriched_map = {}
@@ -967,6 +983,14 @@ def _render_finding_panels(
             body += f"\n[blue]🔧 Fix:[/blue] {enriched_item.fix}"
             if enriched_item.confidence:
                 body += f"\n[blue]📊 Confidence:[/blue] {enriched_item.confidence}"
+
+        claude_item = (claude_reviews or {}).get(key)
+        if claude_item:
+            body += f"\n\n[magenta]Claude Summary:[/magenta] {claude_item.summary}"
+            body += f"\n[magenta]Claude Risk:[/magenta] {claude_item.risk}"
+            body += f"\n[magenta]Claude Fix:[/magenta] {claude_item.fix}"
+            if claude_item.confidence:
+                body += f"\n[magenta]Claude Confidence:[/magenta] {claude_item.confidence}"
 
         console.print(Panel(body, title=header, border_style=border_color, expand=False))
 
@@ -997,13 +1021,21 @@ def _print_table(findings: list[Finding], enriched: list[EnrichedFinding] | None
         console.print(Panel(body, title=header, expand=False))
 
 
-def _print_json(findings: list[Finding], enriched: list[EnrichedFinding] | None, evaluation: dict | None = None):
+def _print_json(
+    findings: list[Finding],
+    enriched: list[EnrichedFinding] | None,
+    evaluation: dict | None = None,
+    claude_reviews: dict | None = None,
+):
     """JSON вывод для интеграций."""
     results = enriched if enriched else findings
     output = []
 
     for item in results:
         d = _item_to_dict(item)
+        claude_item = (claude_reviews or {}).get((item.file, item.line, item.rule_id))
+        if claude_item:
+            d["claude_explanation"] = claude_item.model_dump(mode="json")
         if evaluation:
             # Add policy decision
             for f, decision in evaluation.get("blocked", []):

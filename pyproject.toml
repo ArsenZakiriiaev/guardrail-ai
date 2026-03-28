@@ -9,6 +9,7 @@ description = "Universal safety layer: scan, watch, block, explain, fix."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "anthropic>=0.50,<1.0",
   "pydantic>=2.7,<3.0",
   "requests>=2.31,<3.0",
   "rich>=13.7,<14.0",
@@ -32,7 +33,7 @@ guardrail = "cli.main:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["ai", "cli", "rules", "scanner", "shared", "policy", "audit", "watcher", "hooks", "web", "pentest"]
+include = ["ai", "cli", "functional", "rules", "scanner", "shared", "policy", "audit", "watcher", "hooks", "web", "pentest"]
 
 [tool.setuptools.package-data]
 rules = ["*.yml"]

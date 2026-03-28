@@ -6,11 +6,15 @@ from ai.explain import explain_finding
 from shared.models import EnrichedFinding, Finding
 
 
-def enrich_findings(findings: Iterable[Finding]) -> list[EnrichedFinding]:
+def enrich_findings(
+    findings: Iterable[Finding],
+    *,
+    api_key: str | None = None,
+) -> list[EnrichedFinding]:
     enriched_findings: list[EnrichedFinding] = []
 
     for finding in findings:
-        explanation = explain_finding(finding)
+        explanation = explain_finding(finding, api_key=api_key)
         enriched_findings.append(
             EnrichedFinding(
                 **finding.model_dump(mode="json"),
