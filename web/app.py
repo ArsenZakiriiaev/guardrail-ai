@@ -13,7 +13,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import requests
@@ -221,6 +221,71 @@ async def pentest_url(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/functional")
+async def functional_tests(
+    file: UploadFile = File(...),
+    target_url: str = Form(...),
+    auth_header: str | None = Form(None),
+    api_key: str | None = Form(None),
+):
+    """Upload a PDF spec, extract use cases with Claude, run them against target_url."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        return JSONResponse({"error": "Please upload a PDF file."}, status_code=400)
+
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        return JSONResponse({"error": "PDF too large (max 20 MB)."}, status_code=400)
+
+    tmp_path = None
+    try:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+
+        from functional.engine import run_functional_tests
+        report = run_functional_tests(
+            pdf_path=tmp_path,
+            base_url=target_url.strip(),
+            auth_header=auth_header or None,
+            api_key=api_key or None,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return JSONResponse({
+        "mode": "functional",
+        "total": report.total,
+        "passed": report.passed,
+        "failed": report.failed,
+        "errors": report.errors,
+        "results": [
+            {
+                "name": r.use_case.name,
+                "description": r.use_case.description,
+                "endpoint": r.use_case.endpoint,
+                "method": r.use_case.method,
+                "expected_status": r.use_case.expected_status,
+                "expected_behavior": r.use_case.expected_behavior,
+                "status": r.status,
+                "passed": r.passed,
+                "actual_status_code": r.actual_status_code,
+                "analysis": r.analysis,
+                "failure_reason": r.failure_reason,
+            }
+            for r in report.results
+        ],
+    })
 
 
 @app.get("/api/health")

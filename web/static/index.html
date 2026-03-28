@@ -165,6 +165,30 @@
     @media(max-width:700px){.file-sidebar{display:none}.scanner{border-radius:var(--r)}.mode-tabs{display:none}}
     .scanner-wrap{position:relative}
 
+    /* ── Functional panel ────────── */
+    .functional-panel{display:none;padding-bottom:60px}.functional-panel.show{display:block}
+    .ft-form{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:24px;display:flex;flex-direction:column;gap:16px}
+    .ft-upload-zone{border:2px dashed var(--b2);border-radius:var(--r);padding:40px 24px;text-align:center;cursor:pointer;transition:all .2s}
+    .ft-upload-zone:hover,.ft-upload-zone.dragover{border-color:var(--accent);background:rgba(139,92,246,.04)}
+    .ft-row{display:flex;gap:12px;flex-wrap:wrap}
+    .ft-field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:220px}
+    .ft-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--tx)}
+    .ft-input{background:var(--bg);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;color:var(--t);font-size:12px;font-family:var(--mono);outline:none;transition:border-color .15s}
+    .ft-input:focus{border-color:var(--accent)}
+    .ft-results{margin-top:20px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden}
+    .ftr-head{padding:10px 16px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between}
+    .ftr-sum{padding:8px 16px;border-bottom:1px solid var(--b1);display:flex;gap:14px;font-size:12px;flex-wrap:wrap}
+    .ft-result{border-bottom:1px solid var(--b1)}.ft-result:last-child{border-bottom:none}
+    .ftr-row{padding:10px 16px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;user-select:none}
+    .ftr-row:hover{background:var(--s2)}
+    .ft-badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:4px;flex-shrink:0;margin-top:2px}
+    .ft-badge.pass{background:var(--gbg);color:var(--grn);border:1px solid rgba(34,197,94,.15)}
+    .ft-badge.fail{background:var(--rbg);color:var(--red);border:1px solid rgba(239,68,68,.15)}
+    .ft-badge.error{background:var(--ybg);color:var(--yel);border:1px solid rgba(234,179,8,.15)}
+    .ftr-detail{display:none;padding:0 16px 14px}
+    .ft-result.open .ftr-detail{display:block}
+    .ft-result.open .f-chev{transform:rotate(90deg)}
+
     /* hide/show modes */
     .mode-code{display:flex;flex-direction:column}
     .mode-upload{display:none}
@@ -193,6 +217,7 @@
     <div class="op-tabs">
       <div class="mode-tab op-tab active" data-operation="scan" onclick="setOperation('scan')">🔎 Scan</div>
       <div class="mode-tab op-tab" data-operation="pentest" onclick="setOperation('pentest')">🧪 Pentest</div>
+      <div class="mode-tab op-tab" data-operation="functional" onclick="setOperation('functional')">📋 Functional</div>
     </div>
 
     <div class="op-controls" id="op-controls">
@@ -272,6 +297,41 @@ os.system(user_input)"></textarea>
       </div>
     </div>
 
+    <!-- Functional Testing Panel -->
+    <div class="functional-panel" id="functional-panel">
+      <div class="ft-form">
+        <div class="ft-upload-zone" id="ft-upload-zone" onclick="document.getElementById('pdf-input').click()">
+          <div class="uz-icon">📋</div>
+          <div class="uz-text" id="ft-uz-text">Drop your PDF spec here or click to upload</div>
+          <div class="uz-sub">PDF document describing API use cases — max 20 MB</div>
+        </div>
+        <input type="file" id="pdf-input" accept=".pdf" style="display:none" onchange="ftSelectPdf(this.files[0])">
+        <div class="ft-row">
+          <div class="ft-field" style="flex:2">
+            <label class="ft-label">Target URL</label>
+            <input class="ft-input" id="ft-target-url" placeholder="http://localhost:8000">
+          </div>
+          <div class="ft-field">
+            <label class="ft-label">Auth Header (optional)</label>
+            <input class="ft-input" id="ft-auth-header" placeholder="Authorization: Bearer token">
+          </div>
+        </div>
+        <div class="ft-row">
+          <div class="ft-field">
+            <label class="ft-label">Anthropic API Key (optional — uses ANTHROPIC_API_KEY env var if blank)</label>
+            <input class="ft-input" id="ft-api-key" type="password" placeholder="sk-ant-...">
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="scan-btn" id="ft-run-btn" onclick="runFunctional()" disabled>
+            <span class="spinner"></span>
+            <span class="btn-label">Run Tests</span>
+          </button>
+        </div>
+      </div>
+      <div class="ft-results" id="ft-results" style="display:none"></div>
+    </div>
+
     <div class="features">
       <div class="feat">
         <div class="feat-ic">🔎</div>
@@ -323,12 +383,19 @@ os.system(user_input)"></textarea>
     }
 
     function updateOperationUi() {
-      document.getElementById("op-controls").classList.toggle("show", operation === "pentest");
-      const urlMode = operation === "pentest" && !!(targetUrlInput.value || "").trim();
-      document.getElementById("code-btn-label").innerHTML = operation === "pentest"
-        ? `${urlMode ? "Run URL Pentest" : "Run Pentest"}  <kbd>⌘↵</kbd>`
-        : "Scan All Files  <kbd>⌘↵</kbd>";
-      document.getElementById("zip-btn-label").textContent = operation === "pentest" ? "Pentest ZIP" : "Scan ZIP";
+      const isFunctional = operation === "functional";
+      const isPentest = operation === "pentest";
+      document.getElementById("op-controls").classList.toggle("show", isPentest);
+      document.querySelector(".mode-tabs").style.display = isFunctional ? "none" : "";
+      document.querySelector(".scanner-wrap").style.display = isFunctional ? "none" : "";
+      document.getElementById("functional-panel").classList.toggle("show", isFunctional);
+      if (!isFunctional) {
+        const urlMode = isPentest && !!(targetUrlInput.value || "").trim();
+        document.getElementById("code-btn-label").innerHTML = isPentest
+          ? `${urlMode ? "Run URL Pentest" : "Run Pentest"}  <kbd>⌘↵</kbd>`
+          : "Scan All Files  <kbd>⌘↵</kbd>";
+        document.getElementById("zip-btn-label").textContent = isPentest ? "Pentest ZIP" : "Scan ZIP";
+      }
     }
 
     function getRunnerBaseUrl() {
@@ -634,6 +701,118 @@ os.system(user_input)"></textarea>
     function closeResults() { document.getElementById("results-panel").classList.remove("show"); }
 
     function esc(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+    // ── Functional Testing ───────────────────────────────────────────────────
+    let ftSelectedFile = null;
+
+    function ftSelectPdf(file) {
+      if (!file || !file.name.toLowerCase().endsWith(".pdf")) return;
+      ftSelectedFile = file;
+      const zone = document.getElementById("ft-upload-zone");
+      zone.innerHTML = `<div style="font-size:24px">📄</div><div style="font-size:13px;font-weight:600;margin-top:4px">${esc(file.name)}</div><div style="font-size:11px;color:var(--tm);margin-top:2px">${(file.size/1024).toFixed(1)} KB — click to replace</div>`;
+      document.getElementById("ft-run-btn").disabled = false;
+    }
+
+    (function() {
+      const zone = document.getElementById("ft-upload-zone");
+      zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
+      zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+      zone.addEventListener("drop", e => {
+        e.preventDefault();
+        zone.classList.remove("dragover");
+        const f = e.dataTransfer.files[0];
+        if (f) { document.getElementById("pdf-input").files; ftSelectPdf(f); }
+      });
+    })();
+
+    async function runFunctional() {
+      if (!ftSelectedFile) return;
+      const targetUrl = document.getElementById("ft-target-url").value.trim();
+      if (!targetUrl) { showFunctionalError("Please enter a target URL."); return; }
+
+      const btn = document.getElementById("ft-run-btn");
+      btn.disabled = true;
+      btn.textContent = "Running…";
+
+      const fd = new FormData();
+      fd.append("file", ftSelectedFile);
+      fd.append("target_url", targetUrl);
+      const auth = document.getElementById("ft-auth-header").value.trim();
+      const key = document.getElementById("ft-api-key").value.trim();
+      if (auth) fd.append("auth_header", auth);
+      if (key) fd.append("api_key", key);
+
+      try {
+        const res = await fetch("/api/functional", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok || data.error) { showFunctionalError(data.error || `HTTP ${res.status}`); return; }
+        showFunctionalResults(data);
+      } catch(e) {
+        showFunctionalError(e.message || "Request failed");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Tests";
+      }
+    }
+
+    function showFunctionalResults(data) {
+      const container = document.getElementById("ft-results");
+      const total = data.total || 0, passed = data.passed || 0, failed = data.failed || 0, errors = data.errors || 0;
+      const pct = total ? Math.round(passed / total * 100) : 0;
+      const verdict = (failed === 0 && errors === 0) ? '<span style="color:var(--grn);font-weight:700">PASS</span>' : '<span style="color:var(--red);font-weight:700">FAIL</span>';
+
+      let rows = (data.results || []).map(r => {
+        const cls = r.status === "pass" ? "pass" : r.status === "fail" ? "fail" : "error";
+        const label = r.status || "error";
+        const actual = r.actual_status_code != null ? r.actual_status_code : "—";
+        const expected = r.expected_status != null ? r.expected_status : "—";
+        const reason = r.failure_reason ? `<div style="color:var(--red);font-size:11px;margin-top:3px">${esc(r.failure_reason)}</div>` : "";
+        return `<div class="ft-result">
+          <div class="ftr-row">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${esc(r.name)}</div>
+              <div style="font-size:11px;color:var(--tm);margin-top:2px">${esc((r.description||"").slice(0,120))}</div>
+              <code style="font-size:11px;color:var(--cyan)">${esc(r.method||"GET")} ${esc(r.endpoint||"/")}</code>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:11px;color:var(--tm)">expected <strong>${esc(String(expected))}</strong> got <strong>${esc(String(actual))}</strong></span>
+              <span class="ft-badge ${cls}">${label}</span>
+            </div>
+          </div>
+          <div class="ftr-detail">${esc(r.analysis||"")}${reason}</div>
+        </div>`;
+      }).join("");
+
+      const mkCard = (label, val, color) => `<div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:10px;text-transform:uppercase;color:var(--tm)">${label}</span><span style="font-size:18px;font-weight:700${color?`;color:${color}`:""}">${val}</span></div>`;
+      container.innerHTML = `
+        <div class="ftr-head">
+          <span>Functional Test Results — ${verdict}</span>
+          <button onclick="this.closest('.ft-results').style.display='none'" style="background:none;border:none;color:var(--tm);cursor:pointer;font-size:18px;line-height:1">×</button>
+        </div>
+        <div class="ftr-sum">
+          ${mkCard("Total",total)}
+          ${mkCard("Passed",passed,"var(--grn)")}
+          ${mkCard("Failed",failed,"var(--red)")}
+          ${mkCard("Errors",errors,"var(--yel)")}
+          ${mkCard("Pass Rate",pct+"%")}
+        </div>
+        ${rows}`;
+      container.style.display = "block";
+      container.querySelectorAll(".ftr-row").forEach(row => {
+        row.addEventListener("click", () => row.closest(".ft-result").classList.toggle("open"));
+      });
+    }
+
+    function showFunctionalError(msg) {
+      const container = document.getElementById("ft-results");
+      container.innerHTML = `
+        <div class="ftr-head">
+          <span style="color:var(--red)">Error</span>
+          <button onclick="this.closest('.ft-results').style.display='none'" style="background:none;border:none;color:var(--tm);cursor:pointer;font-size:18px;line-height:1">×</button>
+        </div>
+        <div style="padding:20px;color:var(--red);font-size:13px">${esc(msg)}</div>`;
+      container.style.display = "block";
+    }
 
     // Init
     runnerUrlInput.value = localStorage.getItem(RUNNER_URL_KEY) || "http://127.0.0.1:8001";
