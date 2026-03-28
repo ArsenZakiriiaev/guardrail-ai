@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from scanner.heuristics import analyze_python_heuristics
+
 
 # Папка с правилами относительно корня проекта
 RULES_DIR = Path(__file__).parent.parent / "rules"
@@ -68,11 +70,20 @@ def run_semgrep(target: str) -> dict:
         )
 
     try:
-        return json.loads(result.stdout)
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         raise RuntimeError(
             f"Semgrep returned invalid JSON.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+    try:
+        payload.setdefault("results", [])
+        payload["results"].extend(analyze_python_heuristics(target_path))
+    except Exception:
+        # Heuristics are additive. They should never break the base Semgrep path.
+        pass
+
+    return payload
 
 
 def _resolve_semgrep_binary() -> str:
