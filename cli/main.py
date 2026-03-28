@@ -568,6 +568,114 @@ def policy_show(
     ))
 
 
+# ── Functional testing command ───────────────────────────────────────────────
+
+@app.command()
+def functional(
+    spec: str = typer.Option(..., "--spec", help="Path to PDF document describing use cases"),
+    url: str = typer.Option(..., "--url", help="Base URL of the running application, e.g. http://localhost:8000"),
+    auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
+    api_key: str = typer.Option(None, "--api-key", help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var)"),
+    html_report: str = typer.Option(None, "--html-report", help="Write a standalone HTML report to this path"),
+    timeout: float = typer.Option(10.0, "--timeout", help="Per-request HTTP timeout in seconds"),
+    output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """
+    Run functional / business-logic tests derived from a PDF spec document.
+
+    Uploads the PDF to Claude (claude-opus-4-6), extracts all HTTP use cases,
+    executes each against the running application, then asks Claude whether
+    each response satisfies the expected behaviour.
+
+    Requires ANTHROPIC_API_KEY (or --api-key).
+    """
+    spec_path = Path(spec)
+    if not spec_path.exists():
+        error_console.print(f"[red]Error:[/red] Spec file not found: {spec}")
+        raise typer.Exit(1)
+    if spec_path.suffix.lower() != ".pdf":
+        error_console.print(f"[red]Error:[/red] Spec must be a PDF file.")
+        raise typer.Exit(1)
+
+    if not output_json:
+        console.print(f"[dim]📋 Functional testing:[/dim] {spec}")
+        console.print(f"[dim]   Target:[/dim] {url}")
+
+    try:
+        from functional.engine import run_functional_tests
+    except ImportError as exc:
+        error_console.print(f"[red]Error:[/red] functional module unavailable: {exc}")
+        raise typer.Exit(2)
+
+    try:
+        report = run_functional_tests(
+            pdf_path=spec_path,
+            base_url=url,
+            auth_header=auth_header,
+            api_key=api_key or None,
+            timeout_seconds=timeout,
+            html_report_path=html_report,
+        )
+    except ValueError as exc:
+        error_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(2)
+    except Exception as exc:
+        error_console.print(f"[red]Functional test error:[/red] {exc}")
+        raise typer.Exit(2)
+
+    if output_json:
+        print(report.model_dump_json(indent=2))
+    else:
+        _print_functional_report(report)
+        if report.html_report_path:
+            console.print(f"[green]✓[/green] HTML report: {report.html_report_path}")
+
+    raise typer.Exit(0 if report.failed == 0 and report.errors == 0 else 1)
+
+
+def _print_functional_report(report: "FunctionalTestReport") -> None:  # noqa: F821
+    from rich.table import Table as RichTable
+
+    verdict = "PASS" if report.failed == 0 and report.errors == 0 else "FAIL"
+    color = "green" if verdict == "PASS" else "red"
+    console.print(
+        f"\n[{color}]{verdict}[/{color}]  "
+        f"{report.passed}/{report.total} passed  "
+        f"({report.failed} failed, {report.errors} errors)\n"
+    )
+
+    if not report.results:
+        console.print("[dim]No use cases extracted from the spec.[/dim]")
+        return
+
+    table = Table(title="Functional Test Results", show_header=True)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Use Case", min_width=20)
+    table.add_column("Endpoint", min_width=18)
+    table.add_column("Exp.", justify="right", width=5)
+    table.add_column("Got", justify="right", width=5)
+    table.add_column("Result", width=7)
+    table.add_column("Analysis", min_width=30)
+
+    for i, result in enumerate(report.results, 1):
+        uc = result.use_case
+        status_color = {"pass": "green", "fail": "red", "error": "yellow"}.get(result.status, "dim")
+        exp = str(uc.expected_status) if uc.expected_status else "—"
+        got = str(result.actual_status_code) if result.actual_status_code else "—"
+        analysis = result.analysis or result.failure_reason or ""
+        table.add_row(
+            str(i),
+            uc.name,
+            f"{uc.method} {uc.endpoint}",
+            exp,
+            got,
+            f"[{status_color}]{result.status.upper()}[/{status_color}]",
+            analysis[:80],
+        )
+
+    console.print(table)
+
+
 # ── Audit command ────────────────────────────────────────────────────────────
 
 @app.command()
