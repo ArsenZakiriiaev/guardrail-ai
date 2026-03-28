@@ -1,0 +1,112 @@
+rules:
+  - id: subprocess-shell-true
+    message: Use of subprocess with shell=True can enable command injection
+    severity: ERROR
+    languages:
+      - python
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+    metadata:
+      type: code
+
+  - id: pickle-loads
+    message: Use of pickle deserialization on untrusted data can lead to code execution
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+    metadata:
+      type: code
+
+  - id: unsafe-yaml-load
+    message: yaml.load() without SafeLoader can deserialize unsafe objects
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern: yaml.load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader, ...)
+      - pattern-not: yaml.load(..., Loader=yaml.CSafeLoader, ...)
+      - pattern-not: yaml.load(..., Loader=yaml.FullLoader, ...)
+    metadata:
+      type: code
+
+  - id: yaml-full-loader
+    message: yaml.FullLoader can still deserialize complex Python objects and should be avoided for untrusted YAML
+    severity: ERROR
+    languages:
+      - python
+    pattern: yaml.load(..., Loader=yaml.FullLoader, ...)
+    metadata:
+      type: code
+
+  - id: tempfile-mktemp
+    message: tempfile.mktemp() is insecure and can introduce race conditions
+    severity: ERROR
+    languages:
+      - python
+    pattern: tempfile.mktemp(...)
+    metadata:
+      type: code
+
+  - id: os-system
+    message: os.system() can execute attacker-controlled shell commands
+    severity: ERROR
+    languages:
+      - python
+    pattern: os.system(...)
+    metadata:
+      type: code
+
+  - id: hashlib-md5
+    message: hashlib.md5() is insecure for security-sensitive hashing
+    severity: ERROR
+    languages:
+      - python
+    pattern: hashlib.md5(...)
+    metadata:
+      type: code
+
+  - id: hashlib-sha1
+    message: hashlib.sha1() is insecure for security-sensitive hashing
+    severity: ERROR
+    languages:
+      - python
+    pattern: hashlib.sha1(...)
+    metadata:
+      type: code
+
+  - id: insecure-random-token
+    message: random module is not cryptographically secure for token generation
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern-either:
+          - pattern: $TOKEN = random.choice(...)
+          - pattern: $TOKEN = random.choices(...)
+          - pattern: $TOKEN = random.randint(...)
+          - pattern: $TOKEN = random.randrange(...)
+          - pattern: $TOKEN = "".join(random.choice(...) for ... in ...)
+          - pattern: $TOKEN = ''.join(random.choice(...) for ... in ...)
+          - pattern: $TOKEN = "".join(random.choices(...))
+          - pattern: $TOKEN = ''.join(random.choices(...))
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: (?i).*(token|secret|session|reset|csrf|nonce|otp|auth).*
+    metadata:
+      type: code
+
+  - id: sql-execute-fstring
+    message: SQL built with f-strings can enable SQL injection
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: $DB.execute(f"...")
+      - pattern: $DB.execute(f"...", ...)
+      - pattern: $DB.executemany(f"...")
+      - pattern: $DB.executemany(f"...", ...)
+    metadata:
+      type: code

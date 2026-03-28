@@ -1,0 +1,9 @@
+rules:
+  - id: eval-use
+    message: Use of eval() on potentially untrusted input
+    severity: ERROR
+    languages:
+      - python
+    pattern: eval(...)
+    metadata:
+      type: code

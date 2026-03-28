@@ -3,21 +3,24 @@ cli/main.py — CLI на Typer.
 Команды: guardrail scan <path>, guardrail check <path>, guardrail version
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich import print as rprint
 from rich.panel import Panel
-from rich.text import Text
+
+# Allow `python cli/main.py ...` from the repository root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from scanner.semgrep_runner import run_semgrep
 from scanner.parser import parse_findings
-from shared.models import Finding, Severity
+from shared.models import EnrichedFinding, Finding, Severity
+from shared.redaction import sanitize_snippet
 
 # Попытка импорта AI-слоя Dev 1 (может не быть на момент разработки)
 try:
@@ -32,6 +35,7 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+error_console = Console(stderr=True)
 
 __version__ = "0.1.0"
 
@@ -56,26 +60,30 @@ def scan(
     """
     target = Path(path)
     if not target.exists():
-        console.print(f"[red]Error:[/red] Path not found: {path}")
+        error_console.print(f"[red]Error:[/red] Path not found: {path}")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Scanning:[/dim] {path}")
+    if not output_json:
+        console.print(f"[dim]Scanning:[/dim] {path}")
 
     # 1. Запуск Semgrep
     try:
         raw = run_semgrep(path)
     except FileNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        error_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(2)
     except Exception as e:
-        console.print(f"[red]Scanner error:[/red] {e}")
+        error_console.print(f"[red]Scanner error:[/red] {e}")
         raise typer.Exit(2)
 
     # 2. Парсинг findings
     findings = parse_findings(raw)
 
     if not findings:
-        console.print("[green]✓ No security issues found.[/green]")
+        if output_json:
+            print("[]")
+        else:
+            console.print("[green]✓ No security issues found.[/green]")
         raise typer.Exit(0)
 
     # 3. AI-обогащение (если Dev 1 уже сделал orchestrator)
@@ -83,7 +91,7 @@ def scan(
         try:
             enriched = enrich_findings(findings)
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] AI enrichment failed: {e}")
+            error_console.print(f"[yellow]Warning:[/yellow] AI enrichment failed: {e}")
             enriched = None
     else:
         enriched = None
@@ -123,7 +131,8 @@ def check(
     # Краткий вывод для хука
     console.print(f"[red]✗ {len(findings)} security issue(s) found in {path}[/red]")
     for f in findings:
-        console.print(f"  [{SEVERITY_COLORS[f.severity]}]{f.severity.value.upper()}[/] {f.file}:{f.line} — {f.rule_id}")
+        severity_name = _severity_value(f.severity)
+        console.print(f"  [{SEVERITY_COLORS[f.severity]}]{severity_name.upper()}[/] {f.file}:{f.line} — {f.rule_id}")
 
     raise typer.Exit(1)
 
@@ -136,7 +145,7 @@ def version():
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _print_table(findings, enriched):
+def _print_table(findings: list[Finding], enriched: list[EnrichedFinding] | None):
     """Красивый вывод через Rich."""
     count = len(findings)
     console.print(f"\n[red]✗ Found {count} issue(s):[/red]\n")
@@ -144,42 +153,54 @@ def _print_table(findings, enriched):
     results = enriched if enriched else findings
 
     for item in results:
-        # Для Finding и EnrichedFinding поля одинаковые (совместимость)
         color = SEVERITY_COLORS.get(item.severity, "white")
-        header = f"[{color}]{item.severity.value.upper()}[/] {item.file}:{item.line}"
-        
+        header = f"[{color}]{_severity_value(item.severity).upper()}[/] {item.file}:{item.line}"
         body = f"[bold]{item.rule_id}[/bold]\n{item.message}"
-        
-        if item.snippet:
-            body += f"\n\n[dim]{item.snippet}[/dim]"
+        snippet = sanitize_snippet(item.snippet, item.type, item.rule_id)
 
-        # AI explanation (только для EnrichedFinding от Dev 1)
-        if hasattr(item, "explanation") and item.explanation:
-            body += f"\n\n[blue]AI:[/blue] {item.explanation}"
+        if snippet:
+            body += f"\n\n[dim]{snippet}[/dim]"
 
-        if hasattr(item, "fix_available") and item.fix_available:
-            body += "\n[green]✓ Fix available — run with --fix[/green]"
+        if isinstance(item, EnrichedFinding):
+            body += f"\n\n[blue]Summary:[/blue] {item.summary}"
+            body += f"\n[blue]Risk:[/blue] {item.risk}"
+            body += f"\n[blue]Fix:[/blue] {item.fix}"
+            if item.confidence:
+                body += f"\n[blue]Confidence:[/blue] {item.confidence}"
 
         console.print(Panel(body, title=header, expand=False))
 
 
-def _print_json(findings, enriched):
+def _print_json(findings: list[Finding], enriched: list[EnrichedFinding] | None):
     """JSON вывод для интеграций."""
     results = enriched if enriched else findings
-    output = []
-    for item in results:
-        if hasattr(item, "to_dict"):
-            output.append(item.to_dict())
-        else:
-            output.append({
-                "file": item.file,
-                "line": item.line,
-                "rule_id": item.rule_id,
-                "message": item.message,
-                "snippet": item.snippet,
-                "severity": item.severity.value,
-            })
+    output = [_item_to_dict(item) for item in results]
     print(json.dumps(output, indent=2))
+
+
+def _item_to_dict(item: Finding | EnrichedFinding) -> dict:
+    snippet = sanitize_snippet(item.snippet, item.type, item.rule_id)
+
+    if hasattr(item, "to_dict"):
+        payload = item.to_dict()
+        payload["snippet"] = snippet
+        return payload
+
+    return {
+        "file": item.file,
+        "line": item.line,
+        "rule_id": item.rule_id,
+        "type": item.type,
+        "message": item.message,
+        "snippet": snippet,
+        "severity": _severity_value(item.severity),
+    }
+
+
+def _severity_value(severity: Severity | str) -> str:
+    if isinstance(severity, Severity):
+        return severity.value
+    return str(severity)
 
 
 def main():

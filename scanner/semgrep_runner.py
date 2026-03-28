@@ -3,8 +3,11 @@ scanner/semgrep_runner.py — запускает Semgrep через subprocess,
 возвращает сырой JSON с результатами.
 """
 
-import subprocess
 import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -30,10 +33,14 @@ def run_semgrep(target: str) -> dict:
     if not target_path.exists():
         raise ValueError(f"Target does not exist: {target}")
 
+    semgrep_bin = _resolve_semgrep_binary()
     cmd = [
-        "semgrep",
+        semgrep_bin,
+        "scan",
         "--config", str(RULES_DIR),
         "--json",
+        "--metrics=off",
+        "--disable-version-check",
         "--quiet",
         str(target_path),
     ]
@@ -44,6 +51,7 @@ def run_semgrep(target: str) -> dict:
             capture_output=True,
             text=True,
             timeout=60,
+            env=_build_semgrep_env(),
         )
     except FileNotFoundError:
         raise FileNotFoundError(
@@ -64,3 +72,27 @@ def run_semgrep(target: str) -> dict:
         raise RuntimeError(
             f"Semgrep returned invalid JSON.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+
+def _resolve_semgrep_binary() -> str:
+    interpreter_bin = Path(sys.executable).parent / "semgrep"
+    if interpreter_bin.exists():
+        return str(interpreter_bin)
+
+    system_bin = shutil.which("semgrep")
+    if system_bin:
+        return system_bin
+
+    return "semgrep"
+
+
+def _build_semgrep_env() -> dict[str, str]:
+    env = os.environ.copy()
+    tmp_home = "/tmp/guardrail-semgrep-home"
+    env.setdefault("HOME", tmp_home)
+    env.setdefault("XDG_CONFIG_HOME", f"{tmp_home}/config")
+    env.setdefault("XDG_CACHE_HOME", f"{tmp_home}/cache")
+    env.setdefault("SEMGREP_SETTINGS_FILE", f"{tmp_home}/settings.yml")
+    env.setdefault("SEMGREP_LOG_FILE", f"{tmp_home}/semgrep.log")
+    env.setdefault("SEMGREP_VERSION_CHECK_TIMEOUT", "0")
+    return env

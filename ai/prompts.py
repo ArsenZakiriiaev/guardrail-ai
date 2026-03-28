@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from shared.models import Finding
+from shared.redaction import sanitize_snippet
 
 
 def build_explain_prompt(finding: Finding) -> str:
+    snippet = sanitize_snippet(finding.snippet, finding.type, finding.rule_id)
+
     return f"""You are GuardRail AI, a security assistant for developers.
 
 Analyze the security finding below and return ONLY valid JSON.
@@ -34,11 +37,13 @@ Finding metadata:
 - line: {finding.line}
 
 Code snippet:
-{finding.snippet}
+{snippet}
 """
 
 
 def build_fix_prompt(finding: Finding) -> str:
+    snippet = sanitize_snippet(finding.snippet, finding.type, finding.rule_id)
+
     return f"""You are GuardRail AI, a secure coding assistant for developers.
 
 Generate a minimal safe code fix for the finding below and return ONLY valid JSON.
@@ -68,5 +73,5 @@ Finding metadata:
 - line: {finding.line}
 
 Code snippet:
-{finding.snippet}
+{snippet}
 """

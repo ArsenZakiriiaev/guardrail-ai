@@ -2,8 +2,15 @@
 scanner/parser.py — парсит JSON-ответ Semgrep в список Finding.
 """
 
+from pathlib import Path
 from typing import List
+
 from shared.models import Finding, Severity
+from shared.redaction import (
+    SENSITIVE_SNIPPET_PLACEHOLDER,
+    is_sensitive_finding,
+    sanitize_snippet,
+)
 
 
 # Маппинг severity из Semgrep в наш Enum
@@ -29,37 +36,78 @@ def parse_findings(semgrep_output: dict) -> List[Finding]:
     findings = []
 
     for item in results:
-        # Достаём нужные поля из Semgrep JSON
         file_path = item.get("path", "unknown")
-        line = item.get("start", {}).get("line", 0)
+        line = max(1, int(item.get("start", {}).get("line", 1) or 1))
         rule_id = item.get("check_id", "unknown-rule")
         message = item.get("extra", {}).get("message", "No message")
-        snippet = _extract_snippet(item)
+        finding_type = _parse_type(item, rule_id)
+        snippet = _extract_snippet(item, finding_type, rule_id)
         severity = _parse_severity(item)
 
-        findings.append(Finding(
-            file=file_path,
-            line=line,
-            rule_id=rule_id,
-            message=message,
-            snippet=snippet,
-            severity=severity,
-        ))
+        findings.append(
+            Finding(
+                file=file_path,
+                line=line,
+                rule_id=rule_id,
+                type=finding_type,
+                severity=severity,
+                message=message,
+                snippet=snippet,
+            )
+        )
 
     return findings
 
 
-def _extract_snippet(item: dict) -> str:
+def _extract_snippet(item: dict, finding_type: str, rule_id: str) -> str:
     """Достаёт кусок кода из finding."""
     lines = item.get("extra", {}).get("lines", "")
-    if lines:
-        return lines.strip()
-    
-    # Fallback: берём из метаданных если есть
-    return item.get("extra", {}).get("metavars", {}).get("$X", {}).get("abstract_content", "")
+    if lines and lines.strip().lower() != "requires login":
+        return sanitize_snippet(lines, finding_type, rule_id)
+
+    metavars_content = (
+        item.get("extra", {}).get("metavars", {}).get("$X", {}).get("abstract_content", "")
+    )
+    if metavars_content:
+        return sanitize_snippet(metavars_content, finding_type, rule_id)
+
+    if is_sensitive_finding(finding_type, rule_id):
+        return SENSITIVE_SNIPPET_PLACEHOLDER
+
+    return sanitize_snippet(_read_source_line(item), finding_type, rule_id)
 
 
 def _parse_severity(item: dict) -> Severity:
     """Конвертирует severity Semgrep → наш Severity enum."""
     raw = item.get("extra", {}).get("severity", "WARNING").upper()
     return _SEVERITY_MAP.get(raw, Severity.MEDIUM)
+
+
+def _parse_type(item: dict, rule_id: str) -> str:
+    metadata = item.get("extra", {}).get("metadata", {})
+    candidate = metadata.get("type") or metadata.get("category")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip().lower()
+
+    if "secret" in rule_id or "password" in rule_id or "key" in rule_id:
+        return "secret"
+
+    return "code"
+
+
+def _read_source_line(item: dict) -> str:
+    path = item.get("path")
+    line_number = item.get("start", {}).get("line")
+    if not path or not line_number:
+        return ""
+
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+
+    index = int(line_number) - 1
+    if 0 <= index < len(lines):
+        return lines[index].strip()
+
+    return ""

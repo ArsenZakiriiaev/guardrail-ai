@@ -3,3 +3,4 @@ __pycache__/
 ai/__pycache__/
 shared/__pycache__/
 .vscode/
+.pytest_cache/
