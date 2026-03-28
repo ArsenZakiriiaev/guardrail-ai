@@ -63,7 +63,7 @@ app.add_typer(policy_app, name="policy")
 console = Console()
 error_console = Console(stderr=True)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Цвета по severity
 SEVERITY_COLORS = {
@@ -431,6 +431,54 @@ def audit(
 def version():
     """Show guardrail version."""
     rprint(f"guardrail [bold]{__version__}[/bold]")
+
+
+@app.command(name="help")
+def show_help(
+    command: str = typer.Argument(None, help="Command to get help for"),
+):
+    """Show detailed help and usage examples."""
+    if command:
+        # Delegate to --help for specific commands
+        import subprocess, sys
+        bin_path = sys.argv[0]
+        subprocess.run([bin_path, command, "--help"])
+        return
+
+    console.print(Panel(
+        "[bold]guardrail[/bold] — universal security scanner for Python projects.\n\n"
+        "[bold cyan]INSTALL[/bold cyan]\n"
+        "  pip install git+https://github.com/ArsenZakiriiaev/guardrail-ai.git\n\n"
+        "[bold cyan]QUICK START[/bold cyan]\n"
+        "  guardrail scan app.py          Scan a single file\n"
+        "  guardrail scan src/            Scan entire directory\n"
+        "  guardrail scan . --no-ai       Scan without AI explanations\n"
+        "  guardrail scan . --json        Output as JSON (for CI)\n"
+        "  guardrail check app.py         Quick pass/fail (exit code)\n\n"
+        "[bold cyan]REAL-TIME PROTECTION[/bold cyan]\n"
+        "  guardrail watch                Watch current dir for changes\n"
+        "  guardrail protect              Setup hooks + scan + watch\n"
+        "  guardrail start                Run watcher as background daemon\n"
+        "  guardrail stop                 Stop daemon\n"
+        "  guardrail status               Show protection status\n\n"
+        "[bold cyan]GIT HOOKS[/bold cyan]\n"
+        "  guardrail hooks install        Install pre-commit & pre-push\n"
+        "  guardrail hooks uninstall      Remove hooks\n"
+        "  guardrail hooks status         Show hooks status\n\n"
+        "[bold cyan]POLICY[/bold cyan]\n"
+        "  guardrail policy init          Create .guardrail.yml config\n"
+        "  guardrail policy show          Show active policy\n\n"
+        "[bold cyan]OTHER[/bold cyan]\n"
+        "  guardrail audit                View security audit log\n"
+        "  guardrail version              Show version\n"
+        "  guardrail help <command>       Help for a specific command\n\n"
+        "[bold cyan]ENVIRONMENT[/bold cyan]\n"
+        "  GUARDRAIL_LLM_MODE=mock|ollama   AI backend (default: mock)\n"
+        "  GUARDRAIL_OLLAMA_MODEL=llama3:8b Ollama model name",
+        title="🛡️  Guardrail AI",
+        border_style="green",
+        expand=False,
+    ))
 
 
 @app.command()

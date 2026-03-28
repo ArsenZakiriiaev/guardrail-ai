@@ -1,0 +1,161 @@
+rules:
+  # ── Timing attack: == вместо hmac.compare_digest ──────────────────
+  - id: timing-attack-comparison
+    message: "Comparing secrets/hashes with == is vulnerable to timing attacks. Use hmac.compare_digest()"
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $A.hexdigest() == $B.hexdigest()
+          - pattern: $A.digest() == $B.digest()
+          - pattern: $A.hexdigest() != $B.hexdigest()
+          - pattern: $A.digest() != $B.digest()
+    metadata:
+      type: code
+
+  # ── Weak PRNG in security context (function-level) ────────────────
+  - id: weak-prng-security
+    message: "random module is not cryptographically secure. Use secrets module for tokens, passwords, keys"
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          def $FUNC(...):
+              ...
+              random.choice(...)
+              ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: (?i).*(token|secret|password|reset|key|nonce|otp|session|csrf|auth|salt|iv).*
+    metadata:
+      type: code
+
+  # ── Marshal deserialization (RCE) ─────────────────────────────────
+  - id: marshal-loads
+    message: "marshal.loads() can execute arbitrary code. Never use on untrusted data"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: marshal.loads(...)
+      - pattern: marshal.load(...)
+    metadata:
+      type: code
+
+  # ── Zip Slip: extractall without path validation ──────────────────
+  - id: zipfile-extractall
+    message: "ZipFile.extractall() without member validation allows Zip Slip path traversal"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: zipfile.ZipFile(...).extractall(...)
+      - pattern: |
+          $ZF = zipfile.ZipFile(...)
+          ...
+          $ZF.extractall(...)
+      - pattern: |
+          with zipfile.ZipFile(...) as $ZF:
+              ...
+              $ZF.extractall(...)
+    metadata:
+      type: code
+
+  # ── Mass assignment via setattr ───────────────────────────────────
+  - id: mass-assignment-setattr
+    message: "setattr() in a loop over user-controlled data enables mass assignment (e.g. overwriting is_admin)"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: |
+          for $K, $V in $DATA.items():
+              setattr($OBJ, $K, $V)
+      - pattern: |
+          for $K, $V in $DATA:
+              setattr($OBJ, $K, $V)
+    metadata:
+      type: code
+
+  # ── XXE: xml.etree.ElementTree.fromstring ─────────────────────────
+  - id: xml-fromstring
+    message: "xml.etree.ElementTree parsing can be vulnerable to XML bomb / billion laughs DoS attacks"
+    severity: WARNING
+    languages: [python]
+    pattern-either:
+      - pattern: ET.fromstring(...)
+      - pattern: ElementTree.fromstring(...)
+      - pattern: ET.parse(...)
+      - pattern: ElementTree.parse(...)
+      - pattern: xml.etree.ElementTree.fromstring(...)
+      - pattern: xml.etree.ElementTree.parse(...)
+    metadata:
+      type: code
+
+  # ── JWT none algorithm ────────────────────────────────────────────
+  - id: jwt-none-algorithm
+    message: "Accepting JWT with alg='none' allows forged tokens without a signature"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: |
+          if $HEADER.get("alg") == "none":
+              return $PAYLOAD
+      - pattern: |
+          if $HEADER["alg"] == "none":
+              return $PAYLOAD
+    metadata:
+      type: code
+
+  # ── SSRF: urllib.request.urlopen with user-controlled URL ─────────
+  - id: ssrf-urlopen
+    message: "urllib.request.urlopen() with user-controlled URL can enable SSRF attacks"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: urllib.request.urlopen($URL, ...)
+      - pattern: urllib.request.urlopen($URL)
+    metadata:
+      type: code
+
+  # ── Unsafe deep merge (prototype pollution analog) ────────────────
+  - id: unsafe-deep-merge
+    message: "Recursive dict merge without filtering dunder keys (__class__ etc.) enables prototype pollution attacks"
+    severity: WARNING
+    languages: [python]
+    pattern: |
+      def $FUNC($BASE, $OVERRIDE):
+          for $K, $V in $OVERRIDE.items():
+              ...
+              $BASE[$K] = $V
+          ...
+    metadata:
+      type: code
+
+  # ── Tarfile extractall (same as zip slip) ─────────────────────────
+  - id: tarfile-extractall
+    message: "tarfile.extractall() without filter allows path traversal. Use filter='data' (Python 3.12+)"
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: tarfile.open(...).extractall(...)
+      - pattern: |
+          $TF = tarfile.open(...)
+          ...
+          $TF.extractall(...)
+      - pattern: |
+          with tarfile.open(...) as $TF:
+              ...
+              $TF.extractall(...)
+    metadata:
+      type: code
+
+  # ── Arbitrary file open with user-controlled mode ─────────────────
+  - id: open-user-mode
+    message: "open() with user-controlled mode parameter can lead to arbitrary file write/append"
+    severity: WARNING
+    languages: [python]
+    pattern: |
+      def $FUNC(..., $MODE, ...):
+          ...
+          open($PATH, $MODE)
+          ...
+    metadata:
+      type: code

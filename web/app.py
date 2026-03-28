@@ -1,15 +1,19 @@
 """
 web/app.py — FastAPI web-приложение для Guardrail AI.
-Принимает Python-код, сканирует Semgrep-ом, возвращает результаты с AI-объяснениями.
+Принимает один файл, несколько файлов или ZIP-архив с проектом.
+Сканирует Semgrep-ом, возвращает результаты с AI-объяснениями.
 """
 
 from __future__ import annotations
 
+import io
+import shutil
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,10 +23,12 @@ from shared.redaction import sanitize_snippet
 from ai.explain import explain_finding
 from ai.fix import fix_finding
 
-app = FastAPI(title="Guardrail AI", version="0.2.0")
+app = FastAPI(title="Guardrail AI", version="0.3.0")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+MAX_TOTAL_SIZE = 2_000_000  # 2 MB total upload limit
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -30,40 +36,22 @@ async def index():
     return (STATIC_DIR / "index.html").read_text()
 
 
-@app.post("/api/scan")
-async def scan_code(request: Request):
-    body = await request.json()
-    code: str = body.get("code", "")
-
-    if not code.strip():
-        return JSONResponse({"findings": [], "summary": "No code provided."})
-
-    if len(code) > 100_000:
-        return JSONResponse(
-            {"error": "Code too large (max 100KB)."},
-            status_code=400,
-        )
-
-    # Write to temp file for semgrep
-    scan_id = uuid.uuid4().hex[:8]
-    tmp_dir = Path(tempfile.mkdtemp(prefix="guardrail_"))
-    tmp_file = tmp_dir / f"scan_{scan_id}.py"
-
+def _scan_directory(scan_dir: Path) -> list[dict]:
+    """Scan all Python files in a directory, return enriched findings."""
     try:
-        tmp_file.write_text(code)
-        raw = run_semgrep(str(tmp_file))
+        raw = run_semgrep(str(scan_dir))
         findings = parse_findings(raw)
     except Exception as e:
-        return JSONResponse(
-            {"error": f"Scan failed: {str(e)}"},
-            status_code=500,
-        )
-    finally:
-        tmp_file.unlink(missing_ok=True)
-        tmp_dir.rmdir()
+        return [{"error": str(e)}]
 
     results = []
     for f in findings:
+        # Make file path relative to scan dir
+        try:
+            rel_file = str(Path(f.file).relative_to(scan_dir))
+        except ValueError:
+            rel_file = f.file
+
         snippet = sanitize_snippet(f.snippet, f.type, f.rule_id)
 
         item = {
@@ -71,6 +59,7 @@ async def scan_code(request: Request):
             "severity": f.severity.value,
             "message": f.message,
             "line": f.line,
+            "file": rel_file,
             "snippet": snippet,
             "explanation": None,
             "fix": None,
@@ -100,19 +89,105 @@ async def scan_code(request: Request):
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     results.sort(key=lambda r: severity_order.get(r["severity"], 99))
 
-    blocked = sum(1 for r in results if r["severity"] in ("high", "critical"))
-    warned = sum(1 for r in results if r["severity"] == "medium")
+    return results
 
+
+def _build_response(results: list[dict]) -> JSONResponse:
+    blocked = sum(1 for r in results if r.get("severity") in ("high", "critical"))
+    warned = sum(1 for r in results if r.get("severity") == "medium")
+    # Collect unique files
+    files = sorted(set(r.get("file", "unknown") for r in results))
     return JSONResponse({
         "findings": results,
         "summary": {
             "total": len(results),
             "blocked": blocked,
             "warned": warned,
+            "files_scanned": len(files),
+            "files_with_issues": files,
         },
     })
 
 
+@app.post("/api/scan")
+async def scan_code(request: Request):
+    """Scan one or multiple files passed as JSON: { files: { "name.py": "code..." } }"""
+    body = await request.json()
+
+    # Backwards compat: single-file mode
+    code = body.get("code", "")
+    files = body.get("files", {})
+
+    if code and not files:
+        files = {"main.py": code}
+
+    if not files:
+        return JSONResponse({"findings": [], "summary": {"total": 0}})
+
+    total_size = sum(len(v) for v in files.values())
+    if total_size > MAX_TOTAL_SIZE:
+        return JSONResponse({"error": f"Total code size {total_size} exceeds limit ({MAX_TOTAL_SIZE})."}, status_code=400)
+
+    scan_dir = Path(tempfile.mkdtemp(prefix="guardrail_"))
+    try:
+        for name, content in files.items():
+            # Sanitize filename
+            safe_name = Path(name).name or "file.py"
+            if not safe_name.endswith(".py"):
+                continue
+            fpath = scan_dir / safe_name
+            fpath.write_text(content)
+
+        results = _scan_directory(scan_dir)
+    finally:
+        shutil.rmtree(scan_dir, ignore_errors=True)
+
+    return _build_response(results)
+
+
+@app.post("/api/scan-zip")
+async def scan_zip(file: UploadFile = File(...)):
+    """Upload a .zip of a Python project for scanning."""
+    if not file.filename or not file.filename.endswith(".zip"):
+        return JSONResponse({"error": "Please upload a .zip file."}, status_code=400)
+
+    data = await file.read()
+    if len(data) > MAX_TOTAL_SIZE * 5:
+        return JSONResponse({"error": "ZIP too large (max 10MB)."}, status_code=400)
+
+    scan_dir = Path(tempfile.mkdtemp(prefix="guardrail_zip_"))
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            # Filter: only extract .py files, skip hidden/venv
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename
+                # Skip dangerous paths
+                if ".." in name or name.startswith("/"):
+                    continue
+                # Skip non-python
+                if not name.endswith(".py"):
+                    continue
+                # Skip venv, node_modules, etc
+                parts = Path(name).parts
+                skip_dirs = {".venv", "venv", "node_modules", "__pycache__", ".git", "env", ".tox"}
+                if any(p in skip_dirs for p in parts):
+                    continue
+                # Extract safely
+                target = scan_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(info.filename))
+
+        results = _scan_directory(scan_dir)
+    except zipfile.BadZipFile:
+        return JSONResponse({"error": "Invalid ZIP file."}, status_code=400)
+    finally:
+        shutil.rmtree(scan_dir, ignore_errors=True)
+
+    return _build_response(results)
+
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
