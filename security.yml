@@ -1,0 +1,50 @@
+rules:
+  - id: hardcoded-aws-key
+    patterns:
+      - pattern-regex: '(?:AKIA|AIPA|ASIA|AROA)[A-Z0-9]{16}'
+    message: "Hardcoded AWS Access Key ID detected. Remove immediately and rotate the key."
+    languages: [generic]
+    severity: ERROR
+    metadata:
+      category: security
+      fix_available: true
+
+  - id: hardcoded-aws-secret
+    patterns:
+      - pattern-regex: '(?i)(aws.{0,20})?secret.{0,20}[=:]\s*["\']?[A-Za-z0-9/+=]{40}["\']?'
+    message: "Possible hardcoded AWS Secret Key. Use environment variables or secrets manager."
+    languages: [generic]
+    severity: ERROR
+    metadata:
+      category: security
+      fix_available: true
+
+  - id: hardcoded-password
+    patterns:
+      - pattern-regex: '(?i)(password|passwd|pwd)\s*[=:]\s*["\'][^"\']{4,}["\']'
+    message: "Hardcoded password detected. Use environment variables instead."
+    languages: [generic]
+    severity: WARNING
+    metadata:
+      category: security
+      fix_available: true
+
+  - id: hardcoded-token
+    patterns:
+      - pattern-regex: '(?i)(token|api_key|apikey|secret_key)\s*[=:]\s*["\'][^"\']{8,}["\']'
+    message: "Hardcoded token or API key detected. Move to environment variables."
+    languages: [generic]
+    severity: WARNING
+    metadata:
+      category: security
+      fix_available: true
+
+  - id: eval-usage
+    patterns:
+      - pattern: eval(...)
+    message: "Use of eval() is dangerous. It can execute arbitrary code."
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      fix_available: false

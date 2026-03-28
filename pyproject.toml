@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "guardrail"
+version = "0.1.0"
+description = "Security scanner with AI explanations"
+requires-python = ">=3.10"
+dependencies = [
+    "typer[all]>=0.9",
+    "rich>=13",
+    "semgrep>=1.50",
+]
+
+[project.scripts]
+guardrail = "cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli*", "scanner*", "shared*", "rules*", "ai*"]
