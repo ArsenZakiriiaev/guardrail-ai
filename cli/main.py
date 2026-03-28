@@ -231,7 +231,7 @@ def pentest(
     auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
     output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
-    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for a second AI pass"),
+    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for Claude-guided pentest probes"),
     html_report: str = typer.Option(None, "--html-report", help="Write a standalone HTML report to this path"),
     timeout: int = typer.Option(120, "--timeout", help="Global pentest timeout in seconds"),
     rate_limit: float = typer.Option(4.0, "--rate-limit", help="Maximum requests per second inside the container"),
@@ -296,7 +296,7 @@ def pentest_url(
     auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
     output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
     ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
-    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for a second AI pass"),
+    claude_api_key: str | None = typer.Option(None, "--claude-api-key", help="Optional Claude API key for Claude-guided pentest probes"),
     active: bool = typer.Option(False, "--active", help="Run constrained live active checks in addition to passive checks"),
     allow_host: list[str] = typer.Option(
         None,

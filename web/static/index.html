@@ -233,8 +233,8 @@
     </div>
 
     <div class="ai-controls">
-      <input class="ctrl-input" id="claude-api-key" type="password" placeholder="Optional Claude API key for a second pass">
-      <div class="ctrl-note">Guardrail always runs the built-in scanner or pentest first. If you provide a Claude API key, it also runs a second review through Claude and shows that result next to the local analysis. The key is only sent with the request you run.</div>
+      <input class="ctrl-input" id="claude-api-key" type="password" placeholder="Optional Claude API key for Claude-assisted review / pentest">
+      <div class="ctrl-note">Guardrail always runs the built-in scanner or pentest first. In scan mode Claude adds a second review. In pentest mode Claude proposes extra HTTP probes against the discovered endpoints and Guardrail executes them. The key is only sent with the request you run.</div>
     </div>
 
     <div class="mode-tabs">
