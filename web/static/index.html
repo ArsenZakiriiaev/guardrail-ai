@@ -42,6 +42,14 @@
     .mode-tab{padding:10px 20px;font-size:12px;font-weight:600;color:var(--tm);cursor:pointer;border:1px solid var(--b1);border-bottom:none;background:var(--s1);border-radius:var(--rs) var(--rs) 0 0;transition:all .15s;margin-right:-1px;position:relative}
     .mode-tab.active{color:var(--t);background:var(--s1);border-color:var(--b2);z-index:1}
     .mode-tab:hover:not(.active){color:var(--td);background:var(--s2)}
+    .op-tabs{display:flex;gap:10px;max-width:1080px;padding:0 20px 14px;margin:0 auto}
+    .op-tab{border-bottom:1px solid var(--b1);border-radius:999px;padding:8px 16px;background:var(--s2);margin-right:0}
+    .op-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .op-controls{max-width:1080px;margin:0 auto 14px;padding:0 20px;display:none;gap:12px;align-items:center;flex-wrap:wrap}
+    .op-controls.show{display:flex}
+    .ctrl-input{flex:1;min-width:260px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:10px 12px;color:var(--t);font-size:12px;font-family:var(--mono)}
+    .ctrl-check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--td)}
+    .ctrl-check input{accent-color:var(--accent)}
 
     /* ── Main layout ─────────────── */
     main{max-width:1080px;margin:0 auto;padding:0 20px 60px}
@@ -80,6 +88,7 @@
 
     /* ── Action bar ──────────────── */
     .action-bar{padding:10px 14px;border-top:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;background:var(--s1)}
+    .action-left,.action-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     .scan-btn{background:var(--accent);color:#fff;border:none;padding:7px 20px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:6px;font-family:var(--sans)}
     .scan-btn:hover{background:var(--accent2);transform:translateY(-1px)}
     .scan-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
@@ -179,6 +188,16 @@
   </section>
 
   <main>
+    <div class="op-tabs">
+      <div class="mode-tab op-tab active" data-operation="scan" onclick="setOperation('scan')">🔎 Scan</div>
+      <div class="mode-tab op-tab" data-operation="pentest" onclick="setOperation('pentest')">🧪 Pentest</div>
+    </div>
+
+    <div class="op-controls" id="op-controls">
+      <input class="ctrl-input" id="auth-header" placeholder='Optional auth header for pentest, e.g. Authorization: Bearer token'>
+      <label class="ctrl-check"><input type="checkbox" id="pentest-ai"> AI explanations</label>
+    </div>
+
     <div class="mode-tabs">
       <div class="mode-tab active" data-mode="code" onclick="setMode('code')">✎ Code Editor</div>
       <div class="mode-tab" data-mode="upload" onclick="setMode('upload')">📦 Upload ZIP</div>
@@ -207,11 +226,15 @@ os.system(user_input)"></textarea>
             </div>
           </div>
           <div class="action-bar">
-            <span class="file-count" id="total-info"></span>
-            <button class="scan-btn" id="scan-btn-code" onclick="scanFiles()">
-              <span class="spinner"></span>
-              <span class="btn-label">Scan All Files  <kbd>⌘↵</kbd></span>
-            </button>
+            <div class="action-left">
+              <span class="file-count" id="total-info"></span>
+            </div>
+            <div class="action-right">
+              <button class="scan-btn" id="scan-btn-code" onclick="runCodeAction()">
+                <span class="spinner"></span>
+                <span class="btn-label" id="code-btn-label">Scan All Files  <kbd>⌘↵</kbd></span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -226,7 +249,7 @@ os.system(user_input)"></textarea>
           <div class="upload-info">Upload a ZIP of your Python project. We'll scan every .py file and show all findings with AI explanations.</div>
           <button class="scan-btn" id="scan-btn-zip" style="display:none" onclick="uploadZip(window._lastZip)">
             <span class="spinner"></span>
-            <span class="btn-label">Scan ZIP</span>
+            <span class="btn-label" id="zip-btn-label">Scan ZIP</span>
           </button>
         </div>
 
@@ -267,15 +290,31 @@ os.system(user_input)"></textarea>
     // ── State ──────────────────────────────────
     let files = { "main.py": "" };
     let activeFile = "main.py";
+    let operation = "scan";
     const codeInput = document.getElementById("code-input");
     const fileList = document.getElementById("file-list");
 
     // ── Mode switching ─────────────────────────
     function setMode(mode) {
-      document.querySelectorAll(".mode-tab").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
+      document.querySelectorAll("[data-mode]").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
       document.getElementById("mode-code").style.display = mode === "code" ? "flex" : "none";
       document.getElementById("mode-upload").style.display = mode === "upload" ? "flex" : "none";
       closeResults();
+    }
+
+    function setOperation(next) {
+      operation = next;
+      document.querySelectorAll(".op-tab").forEach(t => t.classList.toggle("active", t.dataset.operation === next));
+      updateOperationUi();
+      closeResults();
+    }
+
+    function updateOperationUi() {
+      document.getElementById("op-controls").classList.toggle("show", operation === "pentest");
+      document.getElementById("code-btn-label").innerHTML = operation === "pentest"
+        ? "Run Pentest  <kbd>⌘↵</kbd>"
+        : "Scan All Files  <kbd>⌘↵</kbd>";
+      document.getElementById("zip-btn-label").textContent = operation === "pentest" ? "Pentest ZIP" : "Scan ZIP";
     }
 
     // ── File management ────────────────────────
@@ -329,11 +368,16 @@ os.system(user_input)"></textarea>
 
     // Cmd+Enter
     codeInput.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); scanFiles(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); runCodeAction(); }
       if (e.key === "Tab") { e.preventDefault(); const s = codeInput.selectionStart, en = codeInput.selectionEnd; codeInput.value = codeInput.value.substring(0, s) + "    " + codeInput.value.substring(en); codeInput.selectionStart = codeInput.selectionEnd = s + 4; }
     });
 
     // ── Scan files ─────────────────────────────
+    function runCodeAction() {
+      if (operation === "pentest") return pentestFiles();
+      return scanFiles();
+    }
+
     async function scanFiles() {
       files[activeFile] = codeInput.value;
       const nonEmpty = {};
@@ -355,6 +399,31 @@ os.system(user_input)"></textarea>
       finally { btn.classList.remove("loading"); btn.disabled = false; }
     }
 
+    async function pentestFiles() {
+      files[activeFile] = codeInput.value;
+      const nonEmpty = {};
+      for (const [k, v] of Object.entries(files)) { if (v.trim()) nonEmpty[k] = v; }
+      if (!Object.keys(nonEmpty).length) return;
+
+      const btn = document.getElementById("scan-btn-code");
+      btn.classList.add("loading"); btn.disabled = true;
+      try {
+        const res = await fetch("/api/pentest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            files: nonEmpty,
+            auth_header: document.getElementById("auth-header").value.trim() || null,
+            ai: document.getElementById("pentest-ai").checked,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) { showError(data.error); return; }
+        showResults(data);
+      } catch(e) { showError("Pentest failed."); }
+      finally { btn.classList.remove("loading"); btn.disabled = false; }
+    }
+
     // ── Upload ZIP ─────────────────────────────
     const uploadZone = document.getElementById("upload-zone");
     uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("dragover"); });
@@ -367,15 +436,20 @@ os.system(user_input)"></textarea>
 
     async function uploadZip(file) {
       if (!file) return;
+      window._lastZip = file;
       const btn = document.getElementById("scan-btn-zip");
       btn.style.display = "flex"; btn.classList.add("loading"); btn.disabled = true;
-      uploadZone.querySelector(".uz-text").textContent = `Scanning ${file.name}...`;
+      uploadZone.querySelector(".uz-text").textContent = `${operation === "pentest" ? "Pentesting" : "Scanning"} ${file.name}...`;
 
       const form = new FormData();
       form.append("file", file);
 
       try {
-        const res = await fetch("/api/scan-zip", { method: "POST", body: form });
+        const endpoint = operation === "pentest" ? "/api/pentest-zip" : "/api/scan-zip";
+        const query = operation === "pentest"
+          ? `?auth_header=${encodeURIComponent(document.getElementById("auth-header").value.trim() || "")}&ai=${document.getElementById("pentest-ai").checked ? "true" : "false"}`
+          : "";
+        const res = await fetch(endpoint + query, { method: "POST", body: form });
         const data = await res.json();
         if (data.error) { showError(data.error); return; }
         showResults(data);
@@ -388,6 +462,7 @@ os.system(user_input)"></textarea>
 
     // ── Results rendering ──────────────────────
     function showResults(data) {
+      if (data.mode === "pentest") return showPentestResults(data);
       const panel = document.getElementById("results-panel");
       const { findings, summary } = data;
 
@@ -434,6 +509,51 @@ os.system(user_input)"></textarea>
       panel.classList.add("show");
     }
 
+    function showPentestResults(data) {
+      const panel = document.getElementById("results-panel");
+      const { findings, summary } = data;
+
+      document.getElementById("rp-title").textContent = `${summary.total} pentest issue${summary.total !== 1 ? "s" : ""}`;
+      document.getElementById("rp-summary").innerHTML = `
+        <span class="stat"><span class="dot ${summary.verdict === "block" ? "r" : summary.verdict === "warn" ? "y" : "g"}"></span>${esc(summary.verdict)} verdict</span>
+        <span class="stat"><span class="dot c"></span>score ${summary.score}</span>
+        <span class="stat"><span class="dot c"></span>${summary.requests_sent} requests</span>
+        <span class="stat"><span class="dot c"></span>${summary.endpoints} endpoints</span>
+      `;
+
+      if (!findings || !findings.length) {
+        document.getElementById("rp-body").innerHTML = `
+          <div class="clean"><div class="clean-ic">✓</div><div class="clean-t">No pentest issues found</div><div class="clean-s">${esc(data.framework || "app")} · score ${summary.score}</div></div>`;
+        panel.classList.add("show");
+        return;
+      }
+
+      document.getElementById("rp-body").innerHTML = findings.map((f, i) => `
+        <div class="finding" id="p-${i}">
+          <div class="fh" onclick="document.getElementById('p-${i}').classList.toggle('open')">
+            <span class="sev ${f.severity}">${f.severity}</span>
+            <div class="fi">
+              <div class="fi-rule">${esc(f.rule_id)}</div>
+              <div class="fi-msg">${esc(f.message)}</div>
+            </div>
+            <span class="fi-file">${esc(f.method)} ${esc(f.endpoint)}</span>
+            <span class="f-chev">›</span>
+          </div>
+          <div class="fd">
+            ${f.proof ? `<div class="ds"><div class="dl">Proof</div><div class="cb snip">${esc(f.proof)}</div></div>` : ""}
+            ${f.evidence ? `<div class="ds"><div class="dl">HTTP Evidence</div><div class="cb snip">${esc(f.evidence)}</div></div>` : ""}
+            ${f.snippet ? `<div class="ds"><div class="dl">Source</div><div class="cb">${esc(f.snippet)}</div></div>` : ""}
+            ${f.explanation ? `<div class="ds"><div class="ai-card">
+              <div class="al summary">💡 What happened</div><p>${esc(f.explanation.summary)}</p>
+              <div class="al risk">⚡ Risk</div><p>${esc(f.explanation.risk)}</p>
+              <div class="al fix-l">🔧 How to fix</div><p>${esc(f.explanation.fix)}</p>
+            </div></div>` : ""}
+          </div>
+        </div>`).join("");
+
+      panel.classList.add("show");
+    }
+
     function showError(msg) {
       document.getElementById("rp-summary").innerHTML = "";
       document.getElementById("rp-body").innerHTML = `<div class="clean"><div class="clean-ic" style="background:var(--rbg);border-color:rgba(239,68,68,.15)">⚠</div><div style="color:var(--red);font-size:13px">${esc(msg)}</div></div>`;
@@ -446,6 +566,7 @@ os.system(user_input)"></textarea>
 
     // Init
     renderFileList();
+    updateOperationUi();
   </script>
 </body>
 </html>

@@ -18,6 +18,7 @@ from shared.redaction import sanitize_snippet
 
 AUDIT_DIR_NAME = ".guardrail"
 AUDIT_FILE_NAME = "audit.jsonl"
+PENTEST_HTTP_FILE_NAME = "pentest_http.jsonl"
 
 
 def _get_audit_path(project_root: str | Path) -> Path:
@@ -29,6 +30,17 @@ def _get_audit_path(project_root: str | Path) -> Path:
         gitignore.write_text("*\n")
 
     return audit_dir / AUDIT_FILE_NAME
+
+
+def pentest_request_log_path(project_root: str | Path) -> Path:
+    audit_dir = Path(project_root) / AUDIT_DIR_NAME
+    audit_dir.mkdir(exist_ok=True)
+
+    gitignore = audit_dir / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n")
+
+    return audit_dir / PENTEST_HTTP_FILE_NAME
 
 
 def log_event(
@@ -114,3 +126,28 @@ def read_audit_log(
             break
 
     return entries
+
+
+def log_pentest_http(
+    project_root: str | Path,
+    *,
+    attack_kind: str,
+    endpoint: str,
+    request_payload: dict,
+    response_payload: dict,
+    source_file: str = "",
+    source_line: int = 0,
+) -> None:
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "attack_kind": attack_kind,
+        "endpoint": endpoint,
+        "source_file": source_file,
+        "source_line": source_line,
+        "request": request_payload,
+        "response": response_payload,
+    }
+
+    path = pentest_request_log_path(project_root)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")

@@ -2,6 +2,7 @@
 cli/main.py — CLI на Typer.
 Команды:
   guardrail scan <path>       — полное сканирование
+  guardrail pentest <path>    — контейнеризированный HTTP pentest
   guardrail check <path>      — быстрая проверка (exit code)
   guardrail watch [path]      — real-time мониторинг
   guardrail hooks install     — установить git-хуки
@@ -40,6 +41,8 @@ from hooks.manager import (
     hooks_status,
     find_git_root,
 )
+from pentest.engine import run_pentest
+from pentest.models import PentestReport
 
 # Попытка импорта AI-слоя Dev 1 (может не быть на момент разработки)
 try:
@@ -206,6 +209,69 @@ def check(
     )
 
     raise typer.Exit(1)
+
+
+@app.command()
+def pentest(
+    path: str = typer.Argument(..., help="Python web app file or project directory"),
+    auth_header: str = typer.Option(None, "--auth-header", help='Optional auth header, e.g. "Authorization: Bearer token"'),
+    output_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    ai: bool = typer.Option(False, "--ai", help="Enable AI explanations for pentest findings"),
+    html_report: str = typer.Option(None, "--html-report", help="Write a standalone HTML report to this path"),
+    timeout: int = typer.Option(120, "--timeout", help="Global pentest timeout in seconds"),
+    rate_limit: float = typer.Option(4.0, "--rate-limit", help="Maximum requests per second inside the container"),
+):
+    """
+    Run an isolated HTTP pentest against a temporary Dockerized app built from source code.
+    Uses SAST results to discover endpoints and focus attacks on likely sinks.
+    """
+    target = Path(path)
+    if not target.exists():
+        error_console.print(f"[red]Error:[/red] Path not found: {path}")
+        raise typer.Exit(1)
+
+    if not output_json:
+        console.print(f"[dim]🧪 Pentesting:[/dim] {path}")
+
+    project_root = find_git_root(path) or target.resolve().parent
+
+    try:
+        report = run_pentest(
+            target=path,
+            auth_header=auth_header,
+            enable_ai=ai,
+            timeout_seconds=timeout,
+            rate_limit_per_second=rate_limit,
+            html_report_path=html_report,
+        )
+    except Exception as e:
+        error_console.print(f"[red]Pentest error:[/red] {e}")
+        raise typer.Exit(2)
+
+    if output_json:
+        print(report.model_dump_json(indent=2))
+    else:
+        _print_pentest_report(report)
+        if report.html_report_path:
+            console.print(f"[green]✓[/green] HTML report: {report.html_report_path}")
+        if report.request_log_path:
+            console.print(f"[dim]HTTP audit log:[/dim] {report.request_log_path}")
+
+    log_event(
+        project_root,
+        "pentest_cli",
+        findings=[finding.to_finding() for finding in report.findings],
+        blocked=report.summary.blocked,
+        warned=report.summary.warned,
+        ignored=report.summary.ignored,
+        trigger="manual",
+        target=path,
+        details=f"score={report.summary.score}; verdict={report.summary.verdict}",
+    )
+
+    if report.summary.verdict == "block":
+        raise typer.Exit(1)
+    raise typer.Exit(0)
 
 
 @app.command()
@@ -454,6 +520,8 @@ def show_help(
         "  guardrail scan src/            Scan entire directory\n"
         "  guardrail scan . --no-ai       Scan without AI explanations\n"
         "  guardrail scan . --json        Output as JSON (for CI)\n"
+        "  guardrail pentest src/         Run isolated HTTP pentest in Docker\n"
+        "  guardrail pentest app.py --ai  Pentest with AI explanations\n"
         "  guardrail check app.py         Quick pass/fail (exit code)\n\n"
         "[bold cyan]REAL-TIME PROTECTION[/bold cyan]\n"
         "  guardrail watch                Watch current dir for changes\n"
@@ -600,6 +668,47 @@ def _print_table_with_policy(
     if ignored:
         parts.append(f"[dim]{len(ignored)} ignored[/dim]")
     console.print(f"\n  Summary: {' | '.join(parts)}\n")
+
+
+def _print_pentest_report(report: PentestReport):
+    summary = report.summary
+    console.print(
+        Panel(
+            f"[bold]Framework:[/bold] {report.framework}\n"
+            f"[bold]Verdict:[/bold] {summary.verdict}\n"
+            f"[bold]Score:[/bold] {summary.score}/100\n"
+            f"[bold]Requests sent:[/bold] {summary.requests_sent}\n"
+            f"[bold]Endpoints:[/bold] {summary.endpoints}",
+            title="🧪 Pentest Summary",
+            border_style="red" if summary.verdict == "block" else "yellow" if summary.verdict == "warn" else "green",
+            expand=False,
+        )
+    )
+
+    if not report.findings:
+        console.print("[green]✓ No pentest issues found.[/green]")
+        return
+
+    table = Table(title=f"Pentest Findings ({len(report.findings)})", show_header=True)
+    table.add_column("Severity", style="bold")
+    table.add_column("Rule")
+    table.add_column("Endpoint")
+    table.add_column("File", max_width=28)
+    table.add_column("Action")
+
+    for finding in report.findings:
+        severity = _severity_value(finding.severity)
+        severity_style = SEVERITY_COLORS.get(finding.severity, "white")
+        action = finding.policy_action or "ignored"
+        table.add_row(
+            f"[{severity_style}]{severity.upper()}[/]",
+            finding.rule_id,
+            f"{finding.method} {finding.endpoint}",
+            f"{Path(finding.file).name}:{finding.line}",
+            action,
+        )
+
+    console.print(table)
 
 
 def _render_finding_panels(

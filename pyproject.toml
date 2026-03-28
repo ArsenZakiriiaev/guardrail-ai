@@ -32,7 +32,7 @@ guardrail = "cli.main:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["ai", "cli", "rules", "scanner", "shared", "policy", "audit", "watcher", "hooks", "web"]
+include = ["ai", "cli", "rules", "scanner", "shared", "policy", "audit", "watcher", "hooks", "web", "pentest"]
 
 [tool.setuptools.package-data]
 rules = ["*.yml"]
