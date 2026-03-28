@@ -1,9 +1,9 @@
 .venv/
 __pycache__/
-ai/__pycache__/
-shared/__pycache__/
-.vscode/
+*.pyc
+.git/
 .pytest_cache/
 .guardrail/
 .guardrail.yml
 *.egg-info/
+.vscode/

@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guardrail AI — Code Security Scanner</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0b;
+      --surface: #111113;
+      --surface-2: #1a1a1d;
+      --border: #222225;
+      --border-light: #2a2a2e;
+      --text: #e4e4e7;
+      --text-dim: #71717a;
+      --text-muted: #52525b;
+      --accent: #8b5cf6;
+      --accent-dim: #7c3aed;
+      --red: #ef4444;
+      --red-bg: rgba(239,68,68,0.08);
+      --yellow: #eab308;
+      --yellow-bg: rgba(234,179,8,0.08);
+      --green: #22c55e;
+      --green-bg: rgba(34,197,94,0.08);
+      --cyan: #06b6d4;
+      --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ─────────────────────────── */
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10,10,11,0.85);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-links {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.15s;
+    }
+
+    .header-links a:hover { color: var(--text); }
+
+    .gh-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-2);
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-dim) !important;
+    }
+
+    .gh-link:hover { border-color: var(--border-light); color: var(--text) !important; }
+
+    /* ── Hero ────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 64px 24px 48px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(139,92,246,0.1);
+      border: 1px solid rgba(139,92,246,0.2);
+      padding: 5px 14px;
+      border-radius: 100px;
+      font-size: 12px;
+      color: var(--accent);
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1.15;
+      margin-bottom: 14px;
+    }
+
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--accent), #c084fc, var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      color: var(--text-dim);
+      font-size: 16px;
+      line-height: 1.6;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* ── Main layout ────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    .scanner-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      min-height: 520px;
+    }
+
+    @media (max-width: 768px) {
+      .scanner-grid {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+    }
+
+    /* ── Editor panel ───────────────────── */
+    .panel {
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .panel-title .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .editor-area {
+      flex: 1;
+      position: relative;
+    }
+
+    #code-input {
+      width: 100%;
+      height: 100%;
+      min-height: 460px;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.65;
+      padding: 16px;
+      resize: none;
+      outline: none;
+      tab-size: 4;
+    }
+
+    #code-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* ── Results panel ──────────────────── */
+    .results-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0;
+    }
+
+    .results-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      min-height: 460px;
+      color: var(--text-muted);
+      font-size: 13px;
+      gap: 8px;
+    }
+
+    .results-empty .empty-icon {
+      font-size: 32px;
+      opacity: 0.3;
+    }
+
+    /* ── Scan button ────────────────────── */
+    .scan-btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 7px 18px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-sans);
+    }
+
+    .scan-btn:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .scan-btn:active { transform: translateY(0); }
+
+    .scan-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .scan-btn .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+
+    .scan-btn.loading .spinner { display: block; }
+    .scan-btn.loading .btn-text { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Summary bar ────────────────────── */
+    .summary-bar {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .stat-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+
+    .stat-dot.red { background: var(--red); }
+    .stat-dot.yellow { background: var(--yellow); }
+    .stat-dot.green { background: var(--green); }
+
+    /* ── Finding card ───────────────────── */
+    .finding {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+
+    .finding:last-child { border-bottom: none; }
+
+    .finding-header {
+      padding: 12px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      user-select: none;
+    }
+
+    .finding-header:hover { background: var(--surface-2); }
+
+    .severity-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 2px 7px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .severity-badge.critical,
+    .severity-badge.high {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(239,68,68,0.15);
+    }
+
+    .severity-badge.medium {
+      background: var(--yellow-bg);
+      color: var(--yellow);
+      border: 1px solid rgba(234,179,8,0.15);
+    }
+
+    .severity-badge.low {
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(34,197,94,0.15);
+    }
+
+    .finding-info { flex: 1; min-width: 0; }
+
+    .finding-rule {
+      font-size: 13px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: var(--text);
+    }
+
+    .finding-msg {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    .finding-line {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      flex-shrink: 0;
+    }
+
+    .finding-chevron {
+      color: var(--text-muted);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+      margin-top: 2px;
+      font-size: 12px;
+    }
+
+    .finding.open .finding-chevron { transform: rotate(90deg); }
+
+    /* ── Finding details ───────────────── */
+    .finding-details {
+      display: none;
+      padding: 0 16px 14px 16px;
+    }
+
+    .finding.open .finding-details { display: block; }
+
+    .detail-section {
+      margin-top: 10px;
+    }
+
+    .detail-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+
+    .detail-text {
+      font-size: 12.5px;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--text);
+    }
+
+    .snippet-block {
+      background: var(--red-bg);
+      border-color: rgba(239,68,68,0.12);
+    }
+
+    .fix-block {
+      background: var(--green-bg);
+      border-color: rgba(34,197,94,0.12);
+    }
+
+    .ai-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+    }
+
+    .ai-card p {
+      font-size: 12.5px;
+      color: var(--text-dim);
+      line-height: 1.55;
+      margin-top: 4px;
+    }
+
+    .ai-card p:first-child { margin-top: 0; }
+
+    .ai-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 2px;
+    }
+
+    .risk-label { color: var(--red); }
+    .fix-label { color: var(--green); }
+
+    /* ── Clean result ──────────────────── */
+    .clean-result {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      min-height: 400px;
+      gap: 8px;
+    }
+
+    .clean-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--green-bg);
+      border: 1px solid rgba(34,197,94,0.15);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .clean-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .clean-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Features ───────────────────────── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 48px;
+    }
+
+    @media (max-width: 640px) {
+      .features { grid-template-columns: 1fr; }
+    }
+
+    .feature {
+      background: var(--surface);
+      padding: 28px 24px;
+    }
+
+    .feature-icon {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .feature h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature p {
+      font-size: 12.5px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ── Footer ─────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 24px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Kbd ─────────────────────────────── */
+    kbd {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🛡️</div>
+      <span>Guardrail AI</span>
+    </div>
+    <div class="header-links">
+      <a href="/api/health">API</a>
+      <a href="https://github.com/ArsenZakiriiaev/guardrail-ai" target="_blank" class="gh-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-badge">
+      <span>⚡</span>
+      Powered by Semgrep + AI
+    </div>
+    <h1>Find vulnerabilities<br><span class="gradient">before they ship</span></h1>
+    <p>Paste your Python code below. Guardrail scans it instantly with static analysis and explains every issue with AI-powered insights.</p>
+  </section>
+
+  <main>
+    <div class="scanner-grid">
+      <!-- Editor -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title"><span class="dot"></span> Input</span>
+          <button class="scan-btn" id="scan-btn" onclick="scanCode()">
+            <span class="spinner"></span>
+            <span class="btn-text">Scan  <kbd>⌘↵</kbd></span>
+          </button>
+        </div>
+        <div class="editor-area">
+          <textarea id="code-input" spellcheck="false" placeholder="# Paste your Python code here...
+
+import os
+password = &quot;secret123&quot;
+os.system(user_input)
+eval(request.args.get('expr'))"></textarea>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Results</span>
+        </div>
+        <div id="summary-bar" class="summary-bar" style="display:none;"></div>
+        <div class="results-body" id="results-body">
+          <div class="results-empty">
+            <div class="empty-icon">🔍</div>
+            <div>Paste code & hit <kbd>Scan</kbd></div>
+            <div style="color:var(--text-muted);font-size:11px;margin-top:2px;">13 Semgrep rules • AI explanations • fix suggestions</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🔎</div>
+        <h3>Static Analysis</h3>
+        <p>13 custom Semgrep rules covering eval, os.system, SQL injection, hardcoded secrets, insecure crypto, and more.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🤖</div>
+        <h3>AI Explanations</h3>
+        <p>Every finding comes with a plain-English summary, risk assessment, and a concrete fix suggestion powered by AI.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🛡️</div>
+        <h3>Git Protection</h3>
+        <p>Install as pre-commit hooks to block dangerous code before it reaches your repository. Works with any Python project.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Guardrail AI v0.2.0 — Open source security scanner
+  </footer>
+
+  <script>
+    const codeInput = document.getElementById('code-input');
+    const scanBtn = document.getElementById('scan-btn');
+    const resultsBody = document.getElementById('results-body');
+    const summaryBar = document.getElementById('summary-bar');
+
+    // Cmd+Enter / Ctrl+Enter to scan
+    codeInput.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        scanCode();
+      }
+      // Tab support
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = codeInput.selectionStart;
+        const end = codeInput.selectionEnd;
+        codeInput.value = codeInput.value.substring(0, start) + '    ' + codeInput.value.substring(end);
+        codeInput.selectionStart = codeInput.selectionEnd = start + 4;
+      }
+    });
+
+    async function scanCode() {
+      const code = codeInput.value.trim();
+      if (!code) return;
+
+      scanBtn.classList.add('loading');
+      scanBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+          showError(data.error);
+          return;
+        }
+
+        renderResults(data);
+      } catch (err) {
+        showError('Connection failed. Is the server running?');
+      } finally {
+        scanBtn.classList.remove('loading');
+        scanBtn.disabled = false;
+      }
+    }
+
+    function showError(msg) {
+      summaryBar.style.display = 'none';
+      resultsBody.innerHTML = `
+        <div class="results-empty">
+          <div class="empty-icon">⚠️</div>
+          <div style="color:var(--red)">${escapeHtml(msg)}</div>
+        </div>`;
+    }
+
+    function renderResults(data) {
+      const { findings, summary } = data;
+
+      if (!findings.length) {
+        summaryBar.style.display = 'none';
+        resultsBody.innerHTML = `
+          <div class="clean-result">
+            <div class="clean-icon">✓</div>
+            <div class="clean-text">No issues found</div>
+            <div class="clean-sub">Your code looks clean</div>
+          </div>`;
+        return;
+      }
+
+      // Summary
+      summaryBar.style.display = 'flex';
+      summaryBar.innerHTML = `
+        <span style="font-weight:600;color:var(--text)">${summary.total} issue${summary.total !== 1 ? 's' : ''}</span>
+        ${summary.blocked ? `<span class="stat"><span class="stat-dot red"></span>${summary.blocked} blocked</span>` : ''}
+        ${summary.warned ? `<span class="stat"><span class="stat-dot yellow"></span>${summary.warned} warning${summary.warned !== 1 ? 's' : ''}</span>` : ''}
+      `;
+
+      // Findings
+      resultsBody.innerHTML = findings.map((f, i) => `
+        <div class="finding" id="finding-${i}">
+          <div class="finding-header" onclick="toggle(${i})">
+            <span class="severity-badge ${f.severity}">${f.severity}</span>
+            <div class="finding-info">
+              <div class="finding-rule">${escapeHtml(f.rule_id)}</div>
+              <div class="finding-msg">${escapeHtml(f.message)}</div>
+            </div>
+            <span class="finding-line">L${f.line}</span>
+            <span class="finding-chevron">›</span>
+          </div>
+          <div class="finding-details">
+            ${f.snippet ? `
+              <div class="detail-section">
+                <div class="detail-label">Code</div>
+                <div class="code-block snippet-block">${escapeHtml(f.snippet)}</div>
+              </div>` : ''}
+            ${f.explanation ? `
+              <div class="detail-section">
+                <div class="ai-card">
+                  <div class="ai-label">💡 What happened</div>
+                  <p>${escapeHtml(f.explanation.summary)}</p>
+                  <div class="ai-label risk-label" style="margin-top:8px;">⚡ Risk</div>
+                  <p>${escapeHtml(f.explanation.risk)}</p>
+                  <div class="ai-label fix-label" style="margin-top:8px;">🔧 How to fix</div>
+                  <p>${escapeHtml(f.explanation.fix)}</p>
+                </div>
+              </div>` : ''}
+            ${f.fix ? `
+              <div class="detail-section">
+                <div class="detail-label">Suggested Fix</div>
+                <div class="code-block fix-block">${escapeHtml(f.fix.fixed_code)}</div>
+                ${f.fix.explanation ? `<div class="detail-text" style="margin-top:6px;font-size:11.5px;color:var(--text-muted)">↳ ${escapeHtml(f.fix.explanation)}</div>` : ''}
+              </div>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function toggle(i) {
+      document.getElementById(`finding-${i}`).classList.toggle('open');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

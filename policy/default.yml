@@ -1,0 +1,47 @@
+# Guardrail-AI Default Policy
+# ───────────────────────────
+
+# Findings at this severity or above will BLOCK commits and pushes
+block_severity: high
+
+# Findings at this severity or above will generate warnings
+warn_severity: medium
+
+# Rules to completely ignore (by rule_id)
+ignored_rules: []
+
+# File extensions to watch in real-time mode
+watched_extensions:
+  - .py
+  - .yml
+  - .yaml
+  - .json
+  - .toml
+  - .cfg
+  - .ini
+  - .env
+  - .sh
+
+# Directories to exclude from watching
+exclude_dirs:
+  - .venv
+  - venv
+  - __pycache__
+  - .git
+  - node_modules
+  - .mypy_cache
+  - .pytest_cache
+  - dist
+  - build
+  - "*.egg-info"
+
+# Maximum file size to scan (bytes) — skip huge files
+max_file_size: 1048576  # 1MB
+
+# Enable/disable features
+features:
+  auto_fix_suggestions: true
+  audit_log: true
+  real_time_watch: true
+  pre_commit_hook: true
+  pre_push_hook: true
