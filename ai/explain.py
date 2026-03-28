@@ -6,8 +6,13 @@ from ai.prompts import build_explain_prompt
 from shared.models import ExplanationResult, Finding
 
 
-def explain_finding(finding: Finding) -> ExplanationResult:
+def explain_finding(
+    finding: Finding,
+    *,
+    context: str | None = None,
+    deep: bool = False,
+) -> ExplanationResult:
     # Build a strict JSON prompt, ask the model, and always return a valid result.
-    prompt = build_explain_prompt(finding)
+    prompt = build_explain_prompt(finding, context=context, deep=deep)
     raw_response = ask_llm(prompt)
     return parse_explain_response(raw_response)

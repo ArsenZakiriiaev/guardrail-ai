@@ -4,8 +4,28 @@ from shared.models import Finding
 from shared.redaction import sanitize_snippet
 
 
-def build_explain_prompt(finding: Finding) -> str:
+def build_explain_prompt(
+    finding: Finding,
+    *,
+    context: str | None = None,
+    deep: bool = False,
+) -> str:
     snippet = sanitize_snippet(finding.snippet, finding.type, finding.rule_id)
+    sanitized_context = sanitize_snippet(context or "", finding.type, finding.rule_id)
+    deep_rules = ""
+    context_block = ""
+
+    if deep:
+        deep_rules = """- Use the surrounding code context to improve precision.
+- Prefer concrete exploitability and impact over generic warnings.
+- If the code context reduces the risk materially, reflect that in the explanation.
+"""
+
+    if sanitized_context:
+        context_block = f"""
+Additional code context:
+{sanitized_context}
+"""
 
     return f"""You are GuardRail AI, a security assistant for developers.
 
@@ -27,6 +47,7 @@ Output rules:
 - Keep risk concrete and realistic.
 - Keep fix practical for a developer.
 - Do not repeat or expose full secret values from the snippet.
+{deep_rules}
 
 Finding metadata:
 - rule_id: {finding.rule_id}
@@ -38,6 +59,7 @@ Finding metadata:
 
 Code snippet:
 {snippet}
+{context_block}
 """
 
 

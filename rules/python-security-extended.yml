@@ -1,0 +1,297 @@
+rules:
+  - id: path-traversal-open-fstring
+    message: Opening files with user-controlled f-strings can enable path traversal
+    severity: ERROR
+    languages:
+      - python
+    pattern-regex: 'open\(\s*f["'']/data/[^"'']*\{[A-Za-z_][A-Za-z0-9_]*\}[^"'']*["'']\s*,'
+    metadata:
+      type: code
+
+  - id: zipfile-extractall
+    message: zipfile extract/extractall without path validation can enable Zip Slip
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern-inside: |
+          with zipfile.ZipFile(...) as $ZIP:
+            ...
+      - pattern-either:
+          - pattern: $ZIP.extractall(...)
+          - pattern: $ZIP.extract(...)
+    metadata:
+      type: code
+
+  - id: xxe-lxml-parser
+    message: XML parser with resolve_entities=True can enable XXE
+    severity: ERROR
+    languages:
+      - python
+    pattern: etree.XMLParser(..., resolve_entities=True, ...)
+    metadata:
+      type: code
+
+  - id: requests-ssrf
+    message: Outbound requests to user-controlled URLs can enable SSRF
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern-either:
+          - pattern: requests.get($URL, ...)
+          - pattern: requests.post($URL, ...)
+          - pattern: requests.put($URL, ...)
+          - pattern: requests.delete($URL, ...)
+          - pattern: requests.head($URL, ...)
+          - pattern: requests.request(..., $URL, ...)
+      - metavariable-regex:
+          metavariable: $URL
+          regex: (?i)(^url$|^uri$|^endpoint$|.*(user|callback|webhook|redirect|next|target).*(url|uri|endpoint|host).*)
+    metadata:
+      type: code
+
+  - id: open-redirect
+    message: Redirecting to user-controlled targets can enable open redirect attacks
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern: redirect($TARGET)
+      - metavariable-regex:
+          metavariable: $TARGET
+          regex: (?i).*(next|redirect|return_to|callback|url).*
+    metadata:
+      type: code
+
+  - id: header-response-splitting
+    message: Header values containing CRLF can enable header injection or response splitting
+    severity: ERROR
+    languages:
+      - python
+    pattern-regex: 'headers\[[^\]]+\]\s*=\s*f?["''][^"'']*\\r\\n[^"'']*["'']'
+    metadata:
+      type: code
+
+  - id: jwt-verify-disabled
+    message: JWT signature verification is disabled
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: |
+          jwt.decode(..., options={"verify_signature": False}, ...)
+      - pattern: jwt.decode(..., verify=False, ...)
+    metadata:
+      type: code
+
+  - id: jwt-alg-none
+    message: JWT configured with algorithm none is insecure
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: jwt.encode(..., algorithm="none", ...)
+      - pattern: jwt.decode(..., algorithms=["none"], ...)
+    metadata:
+      type: code
+
+  - id: insecure-cors-wildcard
+    message: Access-Control-Allow-Origin wildcard can expose sensitive endpoints cross-origin
+    severity: ERROR
+    languages:
+      - python
+    pattern: $RESP.headers["Access-Control-Allow-Origin"] = "*"
+    metadata:
+      type: code
+
+  - id: marshal-loads
+    message: marshal deserialization on untrusted data can be unsafe
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: marshal.load(...)
+      - pattern: marshal.loads(...)
+    metadata:
+      type: code
+
+  - id: dill-loads
+    message: dill deserialization on untrusted data can lead to code execution
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: dill.load(...)
+      - pattern: dill.loads(...)
+    metadata:
+      type: code
+
+  - id: jsonpickle-decode
+    message: jsonpickle.decode on untrusted data can rehydrate unsafe objects
+    severity: ERROR
+    languages:
+      - python
+    pattern: jsonpickle.decode(...)
+    metadata:
+      type: code
+
+  - id: aes-ecb-mode
+    message: AES ECB mode is insecure for most encryption use cases
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: AES.new(..., AES.MODE_ECB)
+      - pattern: AES.new(..., AES.MODE_ECB, ...)
+    metadata:
+      type: code
+
+  - id: static-iv
+    message: Static IV values make encryption deterministic and unsafe
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern: AES.new(..., iv=$IV, ...)
+      - metavariable-regex:
+          metavariable: $IV
+          regex: ^b?["'][^"']+["']$
+    metadata:
+      type: code
+
+  - id: static-salt
+    message: Static salt values weaken password hashing and key derivation
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern: PBKDF2(..., salt=$SALT, ...)
+      - metavariable-regex:
+          metavariable: $SALT
+          regex: ^b?["'][^"']+["']$
+    metadata:
+      type: code
+
+  - id: requests-verify-false
+    message: TLS certificate verification is disabled
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: requests.get(..., verify=False, ...)
+      - pattern: requests.post(..., verify=False, ...)
+      - pattern: requests.put(..., verify=False, ...)
+      - pattern: requests.delete(..., verify=False, ...)
+      - pattern: requests.request(..., verify=False, ...)
+    metadata:
+      type: code
+
+  - id: predictable-tempfile-path
+    message: Predictable temporary file paths can enable race-condition attacks
+    severity: ERROR
+    languages:
+      - python
+    pattern-regex: 'open\(\s*f["'']/tmp/[^"'']*\{[A-Za-z_][A-Za-z0-9_]*\}[^"'']*["'']\s*,'
+    metadata:
+      type: code
+
+  - id: chmod-777
+    message: chmod 777 makes files or directories world-writable
+    severity: ERROR
+    languages:
+      - python
+    pattern: os.chmod(..., 0o777)
+    metadata:
+      type: code
+
+  - id: ldap-filter-fstring
+    message: LDAP filters built with f-strings can enable LDAP injection
+    severity: ERROR
+    languages:
+      - python
+    pattern-either:
+      - pattern: $CONN.search(..., f"...", ...)
+      - pattern: $FILTER = f"($ATTR=$VALUE)"
+    metadata:
+      type: code
+
+  - id: nosql-where-fstring
+    message: NoSQL $where clauses built with f-strings can enable injection
+    severity: ERROR
+    languages:
+      - python
+    pattern: |
+      $COL.find({"$where": f"..."}, ...)
+    metadata:
+      type: code
+
+  - id: jinja2-template-user-input
+    message: Rendering Jinja2 templates from user input can enable SSTI
+    severity: ERROR
+    languages:
+      - python
+    pattern: Template($INPUT).render(...)
+    metadata:
+      type: code
+
+  - id: regex-user-input
+    message: User-controlled regular expressions can enable ReDoS
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern-either:
+          - pattern: re.compile($REGEX)
+          - pattern: re.search($REGEX, ...)
+          - pattern: re.match($REGEX, ...)
+          - pattern: re.fullmatch($REGEX, ...)
+      - metavariable-regex:
+          metavariable: $REGEX
+          regex: (?i).*(regex|pattern|expr|input).*
+    metadata:
+      type: code
+
+  - id: flask-debug-true
+    message: Running Flask with debug=True is unsafe outside development
+    severity: ERROR
+    languages:
+      - python
+    pattern: $APP.run(..., debug=True, ...)
+    metadata:
+      type: code
+
+  - id: tarfile-extractall
+    message: tarfile.extractall without path validation can enable path traversal
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern-inside: |
+          with tarfile.open(...) as $TAR:
+            ...
+      - pattern: $TAR.extractall(...)
+    metadata:
+      type: code
+
+  - id: assert-auth-check
+    message: assert should not be used for authentication or authorization checks
+    severity: ERROR
+    languages:
+      - python
+    patterns:
+      - pattern: assert $CHECK
+      - metavariable-regex:
+          metavariable: $CHECK
+          regex: (?i).*(is_admin|is_authenticated|has_permission|authorized|valid_token|authz|allowed).*
+    metadata:
+      type: code
+
+  - id: os-popen
+    message: os.popen() can execute attacker-controlled shell commands
+    severity: ERROR
+    languages:
+      - python
+    pattern: os.popen(...)
+    metadata:
+      type: code

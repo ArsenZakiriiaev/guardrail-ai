@@ -59,6 +59,18 @@ Scan and print JSON:
 GUARDRAIL_LLM_MODE=mock .venv/bin/guardrail scan examples/vulnerable_demo.py --json
 ```
 
+Run full analysis with summary output:
+
+```bash
+GUARDRAIL_LLM_MODE=mock .venv/bin/guardrail analyze examples/vulnerable_demo.py
+```
+
+Run deep analysis with extra code context for higher-precision explanations:
+
+```bash
+GUARDRAIL_LLM_MODE=mock .venv/bin/guardrail analyze examples/vulnerable_demo.py --deep
+```
+
 Quick check mode for hooks or CI:
 
 ```bash

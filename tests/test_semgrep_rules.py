@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from scanner.parser import parse_findings
 from scanner.semgrep_runner import run_semgrep
 from shared.redaction import SENSITIVE_SNIPPET_PLACEHOLDER
@@ -149,3 +151,62 @@ def test_run_semgrep_does_not_flag_safe_alternatives_for_new_rules(tmp_path) -> 
     assert "rules.sql-execute-fstring" not in rule_ids
     assert "rules.unsafe-yaml-load" not in rule_ids
     assert "rules.yaml-full-loader" not in rule_ids
+
+
+def test_run_semgrep_detects_security_lab_v2_fixture() -> None:
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "security_lab_v2"
+
+    raw = run_semgrep(str(fixture_dir))
+    findings = parse_findings(raw)
+
+    rule_ids = {finding.rule_id for finding in findings}
+
+    assert len(findings) == 32
+    assert len(rule_ids) == 31
+    assert "rules.zipfile-extractall" in rule_ids
+    assert "rules.tarfile-extractall" in rule_ids
+    assert "rules.assert-auth-check" in rule_ids
+    assert "rules.aes-ecb-mode" in rule_ids
+    assert "rules.static-iv" in rule_ids
+    assert "rules.static-salt" in rule_ids
+    assert "rules.marshal-loads" in rule_ids
+    assert "rules.dill-loads" in rule_ids
+    assert "rules.jsonpickle-decode" in rule_ids
+    assert "rules.ldap-filter-fstring" in rule_ids
+    assert "rules.nosql-where-fstring" in rule_ids
+    assert "rules.path-traversal-open-fstring" in rule_ids
+    assert "rules.predictable-tempfile-path" in rule_ids
+    assert "rules.chmod-777" in rule_ids
+    assert "rules.jwt-verify-disabled" in rule_ids
+    assert "rules.jwt-alg-none" in rule_ids
+    assert "rules.subprocess-shell-true" in rule_ids
+    assert "rules.os-popen" in rule_ids
+    assert "rules.hardcoded-api-token" in rule_ids
+    assert "rules.github-token" in rule_ids
+    assert "rules.slack-token" in rule_ids
+    assert "rules.private-key" in rule_ids
+    assert "rules.jinja2-template-user-input" in rule_ids
+    assert "rules.regex-user-input" in rule_ids
+    assert "rules.requests-ssrf" in rule_ids
+    assert "rules.requests-verify-false" in rule_ids
+    assert "rules.open-redirect" in rule_ids
+    assert "rules.header-response-splitting" in rule_ids
+    assert "rules.insecure-cors-wildcard" in rule_ids
+    assert "rules.flask-debug-true" in rule_ids
+    assert "rules.xxe-lxml-parser" in rule_ids
+    assert not any(finding.file.endswith("safe_examples.py") for finding in findings)
+
+
+def test_run_semgrep_does_not_flag_security_lab_v2_safe_examples() -> None:
+    safe_examples = (
+        Path(__file__).resolve().parent.parent
+        / "fixtures"
+        / "security_lab_v2"
+        / "app"
+        / "safe_examples.py"
+    )
+
+    raw = run_semgrep(str(safe_examples))
+    findings = parse_findings(raw)
+
+    assert findings == []

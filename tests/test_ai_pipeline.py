@@ -136,6 +136,28 @@ def test_build_explain_prompt_redacts_secret_values() -> None:
     assert 'AWS_KEY = "<redacted>"' in prompt
 
 
+def test_build_explain_prompt_includes_context_in_deep_mode() -> None:
+    finding = Finding(
+        rule_id="subprocess-shell-true",
+        type="code",
+        severity=Severity.HIGH,
+        message="Use of subprocess with shell=True can enable command injection",
+        file="worker.py",
+        line=10,
+        snippet="subprocess.run(command, shell=True)",
+    )
+
+    prompt = build_explain_prompt(
+        finding,
+        context=" 9: def run(command: str) -> None:\n> 10:     subprocess.run(command, shell=True)",
+        deep=True,
+    )
+
+    assert "Use the surrounding code context to improve precision." in prompt
+    assert "Additional code context:" in prompt
+    assert "subprocess.run(command, shell=True)" in prompt
+
+
 def test_ask_llm_ollama_raises_on_request_failure(monkeypatch) -> None:
     monkeypatch.setenv("GUARDRAIL_LLM_MODE", "ollama")
 
