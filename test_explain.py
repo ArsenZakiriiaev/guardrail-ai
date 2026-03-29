@@ -7,7 +7,6 @@ from ai.explain import explain_finding
 from ai.fix import fix_finding
 from shared.models import Finding
 
-
 def main() -> None:
     finding = Finding(
         rule_id="aws-key",
