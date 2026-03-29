@@ -32,7 +32,14 @@ def _is_running(pid: int) -> bool:
         return False
 
 
-def start_daemon(project_root: str | Path, no_ai: bool = False) -> tuple[bool, str]:
+def start_daemon(
+    project_root: str | Path,
+    no_ai: bool = False,
+    strict: bool = False,
+    notify_clean: bool = False,
+    brain: bool = False,
+    summary_interval: int = 20,
+) -> tuple[bool, str]:
     """Запускает watcher в фоне. Возвращает (success, message)."""
     project = Path(project_root).resolve()
     pidfile = _pid_path(project)
@@ -57,6 +64,14 @@ def start_daemon(project_root: str | Path, no_ai: bool = False) -> tuple[bool, s
 
     if no_ai:
         cmd.append("--no-ai")
+    if strict:
+        cmd.append("--strict")
+    if notify_clean:
+        cmd.append("--notify-clean")
+    if brain:
+        cmd.append("--brain")
+    if summary_interval > 0:
+        cmd.extend(["--summary-interval", str(summary_interval)])
     cmd.append("--no-sound")  # В фоне звук не нужен
 
     # Запускаем

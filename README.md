@@ -180,6 +180,30 @@ Quick pass/fail mode for CI:
 .venv/bin/guardrail check examples/vulnerable_demo.py
 ```
 
+Strict real-time monitoring (every save/create/update is checked immediately):
+
+```bash
+.venv/bin/guardrail watch . --strict
+```
+
+Brain tracking mode (risk scoring, escalation on repeated risky edits, periodic summaries):
+
+```bash
+.venv/bin/guardrail watch . --strict --brain --summary-interval 10
+```
+
+Strict daemon mode with desktop notifications on clean saves too:
+
+```bash
+.venv/bin/guardrail start . --strict --notify-clean
+```
+
+Full background brain tracker:
+
+```bash
+.venv/bin/guardrail start . --strict --brain --notify-clean --summary-interval 10
+```
+
 ### Run an Isolated Pentest from Source
 
 ```bash

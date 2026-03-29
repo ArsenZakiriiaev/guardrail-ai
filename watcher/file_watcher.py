@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
+from watchdog.events import (
+    FileSystemEventHandler,
+    FileModifiedEvent,
+    FileCreatedEvent,
+    FileMovedEvent,
+    FileDeletedEvent,
+)
 
 from rich.console import Console
 from rich.panel import Panel
@@ -151,6 +157,54 @@ class _FindingsCache:
         self._cache.pop(file_path, None)
 
 
+class _RiskTracker:
+    """Лёгкий risk-memory: повышает при повторах, снижает при чистых сохранениях."""
+
+    def __init__(self):
+        self._state: dict[str, dict[str, int]] = {}
+
+    def update(self, rel_path: str, blocked: int, warned: int, clean: bool) -> dict[str, int | bool]:
+        item = self._state.setdefault(
+            rel_path,
+            {
+                "score": 0,
+                "clean_streak": 0,
+                "blocked_hits": 0,
+                "warned_hits": 0,
+                "hot_hits": 0,
+            },
+        )
+
+        if clean:
+            item["clean_streak"] += 1
+            item["score"] = max(0, item["score"] - 1)
+        else:
+            item["clean_streak"] = 0
+            item["blocked_hits"] += blocked
+            item["warned_hits"] += warned
+            item["score"] += blocked * 3 + warned
+            if blocked > 0:
+                item["hot_hits"] += 1
+
+        escalated = item["score"] >= 8 or item["hot_hits"] >= 3
+        return {
+            "score": item["score"],
+            "clean_streak": item["clean_streak"],
+            "blocked_hits": item["blocked_hits"],
+            "warned_hits": item["warned_hits"],
+            "hot_hits": item["hot_hits"],
+            "escalated": escalated,
+        }
+
+    def top_risky(self, limit: int = 3) -> list[tuple[str, int]]:
+        ranked = sorted(
+            ((path, data.get("score", 0)) for path, data in self._state.items()),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        return [(p, s) for p, s in ranked if s > 0][:limit]
+
+
 # ── Event Handler ────────────────────────────────────────────────────────────
 
 class GuardrailEventHandler(FileSystemEventHandler):
@@ -166,6 +220,10 @@ class GuardrailEventHandler(FileSystemEventHandler):
         enable_ai: bool = True,
         enable_notify: bool = True,
         enable_sound: bool = True,
+        strict_mode: bool = False,
+        notify_clean: bool = False,
+        brain_mode: bool = False,
+        summary_interval: int = 20,
     ):
         super().__init__()
         self._project_root = project_root
@@ -176,8 +234,13 @@ class GuardrailEventHandler(FileSystemEventHandler):
         self._enable_ai = enable_ai and AI_AVAILABLE
         self._enable_notify = enable_notify
         self._enable_sound = enable_sound
+        self._strict_mode = strict_mode
+        self._notify_clean = notify_clean
+        self._brain_mode = brain_mode
+        self._summary_interval = max(1, summary_interval)
         self._debouncer = _ScanDebouncer(delay=0.8)
         self._cache = _FindingsCache()
+        self._risk = _RiskTracker()
         self._lock = threading.Lock()
 
         self.scans = 0
@@ -185,18 +248,51 @@ class GuardrailEventHandler(FileSystemEventHandler):
         self.total_blocked = 0
         self.total_warned = 0
         self.clean_saves = 0
+        self.total_events = 0
 
     def on_modified(self, event):
         if not isinstance(event, FileModifiedEvent):
             return
-        self._handle(event.src_path)
+        self._handle(event.src_path, trigger="file_modified")
 
     def on_created(self, event):
         if not isinstance(event, FileCreatedEvent):
             return
-        self._handle(event.src_path)
+        self._handle(event.src_path, trigger="file_created")
 
-    def _handle(self, src_path: str) -> None:
+    def on_moved(self, event):
+        if not isinstance(event, FileMovedEvent):
+            return
+        self._handle(event.dest_path, trigger="file_moved")
+
+    def on_deleted(self, event):
+        if not isinstance(event, FileDeletedEvent):
+            return
+        path = Path(event.src_path)
+        if path.suffix and path.suffix not in self._watched_extensions:
+            return
+        try:
+            rel = str(path.relative_to(self._project_root))
+        except ValueError:
+            rel = str(path)
+
+        with self._lock:
+            self.total_events += 1
+
+        log_event(
+            self._project_root,
+            "watch_scan",
+            findings=[],
+            blocked=0,
+            warned=0,
+            ignored=0,
+            trigger="file_deleted",
+            target=rel,
+            details="deleted",
+        )
+        console.print(f"  [dim]🗑 deleted: {rel}[/dim]")
+
+    def _handle(self, src_path: str, trigger: str = "file_save") -> None:
         path = Path(src_path)
 
         if not path.is_file():
@@ -214,9 +310,12 @@ class GuardrailEventHandler(FileSystemEventHandler):
         if path.name.startswith(".") or path.name.startswith("~"):
             return
 
-        self._debouncer.debounce(str(path), self._scan_file, str(path))
+        with self._lock:
+            self.total_events += 1
 
-    def _scan_file(self, file_path: str) -> None:
+        self._debouncer.debounce(str(path), self._scan_file, str(path), trigger)
+
+    def _scan_file(self, file_path: str, trigger: str = "file_save") -> None:
         with self._lock:
             self.scans += 1
 
@@ -236,16 +335,59 @@ class GuardrailEventHandler(FileSystemEventHandler):
             with self._lock:
                 self.clean_saves += 1
             self._cache.clear(file_path)
+
+            risk = self._risk.update(rel, blocked=0, warned=0, clean=True)
+
+            log_event(
+                self._project_root,
+                "watch_scan",
+                findings=[],
+                blocked=0,
+                warned=0,
+                ignored=0,
+                trigger=trigger,
+                target=rel,
+                details=f"clean score={risk['score']}",
+            )
+
             console.print(f"  [green]✓[/green] [dim]{rel}[/dim]")
+
+            if self._enable_notify and self._notify_clean:
+                _notify_system("Guardrail: clean save", rel, urgent=False)
+
+            self._maybe_print_brain_summary()
             return
 
         new_findings = self._cache.get_new(file_path, findings)
         if not new_findings:
+            evaluation_all = evaluate_findings(findings, self._policy)
+            blocked_count = len(evaluation_all["blocked"])
+            warned_count = len(evaluation_all["warned"])
+            risk = self._risk.update(rel, blocked=blocked_count, warned=warned_count, clean=False)
+
+            log_event(
+                self._project_root,
+                "watch_scan",
+                findings=[],
+                blocked=blocked_count,
+                warned=warned_count,
+                ignored=len(evaluation_all["ignored"]),
+                trigger=trigger,
+                target=rel,
+                details=f"unchanged score={risk['score']}",
+            )
+            self._maybe_print_brain_summary()
             return
 
         evaluation = evaluate_findings(new_findings, self._policy)
         blocked = evaluation["blocked"]
         warned = evaluation["warned"]
+
+        if self._strict_mode and warned:
+            blocked = blocked + warned
+            warned = []
+
+        risk = self._risk.update(rel, blocked=len(blocked), warned=len(warned), clean=False)
 
         with self._lock:
             self.total_findings += len(new_findings)
@@ -259,8 +401,12 @@ class GuardrailEventHandler(FileSystemEventHandler):
             blocked=len(blocked),
             warned=len(warned),
             ignored=len(evaluation["ignored"]),
-            trigger="file_save",
+            trigger=trigger,
             target=rel,
+            details=(
+                f"{'strict' if self._strict_mode else 'normal'} "
+                f"score={risk['score']}"
+            ),
         )
 
         if not blocked and not warned:
@@ -311,7 +457,24 @@ class GuardrailEventHandler(FileSystemEventHandler):
                 body_lines.append(f"• {f.rule_id} ({rel}:{f.line})")
             if len(blocked) > 3:
                 body_lines.append(f"  ... и ещё {len(blocked) - 3}")
+            if self._brain_mode:
+                body_lines.append(f"  risk score: {risk['score']}")
             _notify_system(title, "\n".join(body_lines), urgent=has_high)
+
+        if self._brain_mode:
+            score = risk["score"]
+            streak = risk["clean_streak"]
+            console.print(
+                f"  [dim]🧠 score={score} clean_streak={streak} file={rel}[/dim]"
+            )
+            if risk["escalated"] and self._enable_notify:
+                _notify_system(
+                    "Guardrail escalation",
+                    f"{rel}: repeated risky changes (score={score})",
+                    urgent=True,
+                )
+
+        self._maybe_print_brain_summary()
 
     def _render_alert(
         self,
@@ -357,6 +520,18 @@ class GuardrailEventHandler(FileSystemEventHandler):
     def stop(self):
         self._debouncer.cancel_all()
 
+    def _maybe_print_brain_summary(self) -> None:
+        if not self._brain_mode:
+            return
+        if self.scans % self._summary_interval != 0:
+            return
+        top = self._risk.top_risky(limit=3)
+        if not top:
+            console.print("  [dim]🧠 summary: no risky files right now[/dim]")
+            return
+        items = ", ".join(f"{path}({score})" for path, score in top)
+        console.print(f"  [dim]🧠 summary: {items}[/dim]")
+
 
 # ── Запуск ───────────────────────────────────────────────────────────────────
 
@@ -366,6 +541,10 @@ def start_watching(
     no_ai: bool = False,
     no_notify: bool = False,
     no_sound: bool = False,
+    strict: bool = False,
+    notify_clean: bool = False,
+    brain: bool = False,
+    summary_interval: int = 20,
 ) -> None:
     """Запускает real-time защиту проекта. Блокирующий — до Ctrl+C."""
     project = Path(project_root).resolve()
@@ -387,6 +566,10 @@ def start_watching(
         enable_ai=not no_ai,
         enable_notify=not no_notify,
         enable_sound=not no_sound,
+        strict_mode=strict,
+        notify_clean=notify_clean,
+        brain_mode=brain,
+        summary_interval=summary_interval,
     )
 
     observer = Observer()
@@ -395,11 +578,15 @@ def start_watching(
 
     ai_status = "[green]ON[/green]" if (AI_AVAILABLE and not no_ai) else "[dim]OFF[/dim]"
     notify_status = "[green]ON[/green]" if not no_notify else "[dim]OFF[/dim]"
+    mode_status = "[bold red]STRICT[/bold red]" if strict else "[green]NORMAL[/green]"
+    brain_status = "[green]ON[/green]" if brain else "[dim]OFF[/dim]"
 
     console.print(Panel(
         f"[bold green]Guardrail активен[/bold green]\n\n"
         f"  Проект:     [cyan]{project}[/cyan]\n"
         f"  Расширения: {', '.join(sorted(watched_extensions))}\n"
+        f"  Режим:      {mode_status}\n"
+        f"  Brain:      {brain_status}  (summary each {summary_interval} scans)\n"
         f"  Политика:   severity >= [red]{policy.get('block_severity', 'high')}[/red] → блок, "
         f">= [yellow]{policy.get('warn_severity', 'medium')}[/yellow] → предупреждение\n"
         f"  AI:         {ai_status}  |  Уведомления: {notify_status}\n\n"
@@ -425,6 +612,7 @@ def start_watching(
         console.print()
         console.print(Panel(
             f"  Сканирований: [bold]{handler.scans}[/bold]\n"
+            f"  Событий файлов: [bold]{handler.total_events}[/bold]\n"
             f"  Чистых сохранений: [green]{handler.clean_saves}[/green]\n"
             f"  Найдено проблем: [bold]{handler.total_findings}[/bold]\n"
             f"  Заблокировано: [red]{handler.total_blocked}[/red]\n"

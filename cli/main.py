@@ -410,6 +410,10 @@ def watch(
     no_ai: bool = typer.Option(False, "--no-ai", help="Disable AI explanations/fixes"),
     no_notify: bool = typer.Option(False, "--no-notify", help="Disable system notifications"),
     no_sound: bool = typer.Option(False, "--no-sound", help="Disable sound alerts"),
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as blocking findings"),
+    notify_clean: bool = typer.Option(False, "--notify-clean", help="Send desktop notifications on clean saves"),
+    brain: bool = typer.Option(False, "--brain", help="Enable adaptive risk tracking and periodic summaries"),
+    summary_interval: int = typer.Option(20, "--summary-interval", min=1, help="Print risk summary every N scans"),
 ):
     """
     🛡️ Real-time protection — watches your files and alerts on every save.
@@ -423,13 +427,25 @@ def watch(
         error_console.print(f"[red]Error:[/red] {path} is not a directory")
         raise typer.Exit(1)
 
-    start_watching(target, no_ai=no_ai, no_notify=no_notify, no_sound=no_sound)
+    start_watching(
+        target,
+        no_ai=no_ai,
+        no_notify=no_notify,
+        no_sound=no_sound,
+        strict=strict,
+        notify_clean=notify_clean,
+        brain=brain,
+        summary_interval=summary_interval,
+    )
 
 
 @app.command()
 def protect(
     path: str = typer.Argument(".", help="Project root (default: current)"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Disable AI explanations/fixes"),
+    strict: bool = typer.Option(False, "--strict", help="Enable strict watch mode after setup"),
+    brain: bool = typer.Option(False, "--brain", help="Enable adaptive risk tracking while watching"),
+    summary_interval: int = typer.Option(20, "--summary-interval", min=1, help="Print risk summary every N scans"),
 ):
     """
     🛡️ One command to rule them all.
@@ -491,7 +507,13 @@ def protect(
     console.print()
 
     # 4. Start watching
-    start_watching(target, no_ai=no_ai)
+    start_watching(
+        target,
+        no_ai=no_ai,
+        strict=strict,
+        brain=brain,
+        summary_interval=summary_interval,
+    )
 
 
 # ── Hooks sub-commands ───────────────────────────────────────────────────────
@@ -792,6 +814,10 @@ def show_help(
 def start(
     path: str = typer.Argument(".", help="Project root (default: current)"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Disable AI enrichment"),
+    strict: bool = typer.Option(False, "--strict", help="Enable strict watch mode in daemon"),
+    notify_clean: bool = typer.Option(False, "--notify-clean", help="Notify on clean saves in daemon mode"),
+    brain: bool = typer.Option(False, "--brain", help="Enable adaptive risk tracking in daemon mode"),
+    summary_interval: int = typer.Option(20, "--summary-interval", min=1, help="Print risk summary every N scans"),
 ):
     """
     Start Guardrail watcher in the background (daemon mode).
@@ -800,7 +826,14 @@ def start(
     from watcher.daemon import start_daemon
 
     target = Path(path).resolve()
-    success, message = start_daemon(target, no_ai=no_ai)
+    success, message = start_daemon(
+        target,
+        no_ai=no_ai,
+        strict=strict,
+        notify_clean=notify_clean,
+        brain=brain,
+        summary_interval=summary_interval,
+    )
     if success:
         console.print(f"[green]✓[/green] {message}")
         log_event(target, "daemon_start", trigger="manual", target=str(target), details=message)
