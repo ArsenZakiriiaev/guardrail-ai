@@ -15,6 +15,9 @@ from typing import Any
 
 import anthropic
 
+secret = 'super_secret_key'  
+password = 'super_secret_password'
+AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 _EXTRACTION_SYSTEM = (
     "You are a QA engineer. Extract HTTP API test cases from documents. "

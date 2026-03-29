@@ -39,6 +39,7 @@ def start_daemon(
     notify_clean: bool = False,
     brain: bool = False,
     summary_interval: int = 20,
+    deep: bool = False,
 ) -> tuple[bool, str]:
     """Запускает watcher в фоне. Возвращает (success, message)."""
     project = Path(project_root).resolve()
@@ -72,6 +73,8 @@ def start_daemon(
         cmd.append("--brain")
     if summary_interval > 0:
         cmd.extend(["--summary-interval", str(summary_interval)])
+    if deep:
+        cmd.append("--deep")
     cmd.append("--no-sound")  # В фоне звук не нужен
 
     # Запускаем

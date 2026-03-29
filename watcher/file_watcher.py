@@ -52,6 +52,12 @@ try:
 except ImportError:
     AI_AVAILABLE = False
 
+try:
+    from ai.deep_scan import deep_scan_file
+    DEEP_SCAN_AVAILABLE = True
+except ImportError:
+    DEEP_SCAN_AVAILABLE = False
+
 
 console = Console(stderr=True)
 
@@ -224,6 +230,7 @@ class GuardrailEventHandler(FileSystemEventHandler):
         notify_clean: bool = False,
         brain_mode: bool = False,
         summary_interval: int = 20,
+        deep_scan: bool = False,
     ):
         super().__init__()
         self._project_root = project_root
@@ -238,6 +245,7 @@ class GuardrailEventHandler(FileSystemEventHandler):
         self._notify_clean = notify_clean
         self._brain_mode = brain_mode
         self._summary_interval = max(1, summary_interval)
+        self._deep_scan = deep_scan and DEEP_SCAN_AVAILABLE
         self._debouncer = _ScanDebouncer(delay=0.8)
         self._cache = _FindingsCache()
         self._risk = _RiskTracker()
@@ -249,6 +257,7 @@ class GuardrailEventHandler(FileSystemEventHandler):
         self.total_warned = 0
         self.clean_saves = 0
         self.total_events = 0
+        self.deep_findings = 0
 
     def on_modified(self, event):
         if not isinstance(event, FileModifiedEvent):
@@ -330,6 +339,21 @@ class GuardrailEventHandler(FileSystemEventHandler):
         except Exception as e:
             console.print(f"  [dim]⚠ scan error {rel}: {e}[/dim]")
             return
+
+        # ── AI Deep Scan ─────────────────────────────────────────────────
+        if self._deep_scan and file_path.endswith(".py"):
+            try:
+                ai_findings = deep_scan_file(file_path)
+                if ai_findings:
+                    with self._lock:
+                        self.deep_findings += len(ai_findings)
+                    findings = findings + ai_findings
+                    console.print(
+                        f"  [magenta]🔬 AI deep scan: "
+                        f"{len(ai_findings)} issue(s) in {rel}[/magenta]"
+                    )
+            except Exception as e:
+                console.print(f"  [dim]⚠ deep scan error {rel}: {e}[/dim]")
 
         if not findings:
             with self._lock:
@@ -545,6 +569,7 @@ def start_watching(
     notify_clean: bool = False,
     brain: bool = False,
     summary_interval: int = 20,
+    deep: bool = False,
 ) -> None:
     """Запускает real-time защиту проекта. Блокирующий — до Ctrl+C."""
     project = Path(project_root).resolve()
@@ -570,6 +595,7 @@ def start_watching(
         notify_clean=notify_clean,
         brain_mode=brain,
         summary_interval=summary_interval,
+        deep_scan=deep,
     )
 
     observer = Observer()
@@ -580,6 +606,7 @@ def start_watching(
     notify_status = "[green]ON[/green]" if not no_notify else "[dim]OFF[/dim]"
     mode_status = "[bold red]STRICT[/bold red]" if strict else "[green]NORMAL[/green]"
     brain_status = "[green]ON[/green]" if brain else "[dim]OFF[/dim]"
+    deep_status = "[bold magenta]ON[/bold magenta]" if deep else "[dim]OFF[/dim]"
 
     console.print(Panel(
         f"[bold green]Guardrail активен[/bold green]\n\n"
@@ -587,6 +614,7 @@ def start_watching(
         f"  Расширения: {', '.join(sorted(watched_extensions))}\n"
         f"  Режим:      {mode_status}\n"
         f"  Brain:      {brain_status}  (summary each {summary_interval} scans)\n"
+        f"  Deep scan:  {deep_status}\n"
         f"  Политика:   severity >= [red]{policy.get('block_severity', 'high')}[/red] → блок, "
         f">= [yellow]{policy.get('warn_severity', 'medium')}[/yellow] → предупреждение\n"
         f"  AI:         {ai_status}  |  Уведомления: {notify_status}\n\n"
@@ -612,6 +640,7 @@ def start_watching(
         console.print()
         console.print(Panel(
             f"  Сканирований: [bold]{handler.scans}[/bold]\n"
+            f"  AI deep findings: [magenta]{handler.deep_findings}[/magenta]\n"
             f"  Событий файлов: [bold]{handler.total_events}[/bold]\n"
             f"  Чистых сохранений: [green]{handler.clean_saves}[/green]\n"
             f"  Найдено проблем: [bold]{handler.total_findings}[/bold]\n"
