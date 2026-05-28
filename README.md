@@ -1,4 +1,4 @@
-# Guardrail AI
+# Guardrail AI (AI DEV HACKATHON-2ND PLACE)
 
 Guardrail AI is a local-first security workflow for Python applications. It combines static scanning, policy evaluation, isolated HTTP pentesting, functional testing from a PDF spec, a web UI, and optional AI-assisted analysis in one toolchain.
 
